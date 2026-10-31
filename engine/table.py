@@ -178,63 +178,84 @@ class _Hand:
     # -- betting -----------------------------------------------------------
 
     def _betting_round(self, first: int) -> None:
+        # Reopening rules mirror PokerKit; PLACEHOLDER(kit): check the kit's simulator
+        # treats short all-in raises the same way.
+        #  - A raise at least as big as the largest raise so far this street (from 0,
+        #    so the first bet always counts) reopens raising for everyone.
+        #  - Consecutive short all-in raises accumulate; once they add up to a full
+        #    raise, players who already acted may raise again.
+        #  - Nobody may raise unless some other live player could put in more.
         n = self.n
         bets, stacks, in_hand = self.bets, self.stacks, self.in_hand
         highest = max(bets)
-        min_raise = self.bb  # size of the last full raise; a big blind to start
-        full_raises = 0
-        acted_at = [-1] * n  # full_raises when the seat last acted; -1 = not yet
-        needs = {s for s in range(n) if in_hand[s] and stacks[s] > 0}
-        seat = first
+        largest_raise = 0
+        acted: set[int] = set()
+        short_all_ins: list[int] = []
+        # Who acts is settled once, here, like PokerKit: a seat acts if it has chips
+        # and could still win more than it has already put in, i.e. the second-largest
+        # total (bet + stack) among live players exceeds its bet. The round is skipped
+        # only when a single such seat is left and it already covers the bet;
+        # mid-street everyone still due to act is asked, even if only to check.
+        totals = sorted(bets[s] + stacks[s] for s in range(n) if in_hand[s])
+        second = totals[-2] if len(totals) > 1 else 0
+        needs = {s for s in range(n) if in_hand[s] and stacks[s] > 0 and second > bets[s]}
+        if len(needs) == 1 and bets[next(iter(needs))] >= highest:
+            return
+        seat = (first - 1) % n
         while needs:
-            if seat in needs:
-                to_call = highest - bets[seat]
-                others_have_chips = any(
-                    s != seat and in_hand[s] and stacks[s] > 0 for s in range(n)
-                )
-                if to_call <= 0 and not others_have_chips:
-                    needs.discard(seat)  # nobody left to bet into
-                else:
-                    # Raising is open if we haven't acted yet (-1) or a full raise came since.
-                    reopened = acted_at[seat] < full_raises
-                    legal = self._legal(seat, highest, to_call, min_raise, others_have_chips and reopened)
-                    action = self._decide(seat, legal)
-                    kind = action.kind
-                    if kind == FOLD:
-                        in_hand[seat] = False
-                        needs.discard(seat)
-                        self._record(seat, FOLD, bets[seat])
-                        if sum(in_hand) == 1:
-                            return
-                    elif kind == CHECK:
-                        needs.discard(seat)
-                        self._record(seat, CHECK, bets[seat])
-                    elif kind == CALL:
-                        self._pay(seat, min(to_call, stacks[seat]))
-                        needs.discard(seat)
-                        self._record(seat, CALL, bets[seat])
-                    else:
-                        raise_to = action.amount
-                        self._pay(seat, raise_to - bets[seat])
-                        if raise_to - highest >= min_raise:
-                            min_raise = raise_to - highest
-                            full_raises += 1
-                        highest = raise_to
-                        needs = {s for s in range(n) if s != seat and in_hand[s] and stacks[s] > 0}
-                        self._record(seat, RAISE, raise_to)
-                    acted_at[seat] = full_raises
-                    if stacks[seat] == 0:
-                        needs.discard(seat)
             seat = (seat + 1) % n
+            if seat not in needs:
+                continue
+            to_call = highest - bets[seat]
+            raise_allowed = (
+                to_call >= largest_raise
+                and not (short_all_ins and seat in acted)
+                and any(s != seat and in_hand[s] and stacks[s] + bets[s] > highest for s in range(n))
+            )
+            legal = self._legal(seat, highest, to_call, largest_raise, raise_allowed)
+            action = self._decide(seat, legal)
+            kind = action.kind
+            if kind == FOLD:
+                in_hand[seat] = False
+                needs.discard(seat)
+                self._record(seat, FOLD, bets[seat])
+                if sum(in_hand) == 1:
+                    return
+            elif kind == CHECK:
+                needs.discard(seat)
+                self._record(seat, CHECK, bets[seat])
+            elif kind == CALL:
+                self._pay(seat, min(to_call, stacks[seat]))
+                needs.discard(seat)
+                self._record(seat, CALL, bets[seat])
+            else:
+                raise_to = action.amount
+                size = raise_to - highest
+                self._pay(seat, raise_to - bets[seat])
+                if size >= largest_raise:
+                    acted.clear()
+                largest_raise = max(largest_raise, size)
+                if stacks[seat] > 0:
+                    short_all_ins.clear()
+                else:
+                    short_all_ins.append(size)
+                if sum(short_all_ins) >= largest_raise:
+                    short_all_ins.clear()
+                highest = raise_to
+                needs = {s for s in range(n) if s != seat and in_hand[s] and stacks[s] > 0}
+                self._record(seat, RAISE, raise_to)
+            acted.add(seat)
+            if stacks[seat] == 0:
+                needs.discard(seat)
 
-    def _legal(self, seat, highest, to_call, min_raise, raise_allowed) -> LegalActions:
+    def _legal(self, seat, highest, to_call, largest_raise, raise_allowed) -> LegalActions:
         stack = self.stacks[seat]
         can_raise = raise_allowed and stack > to_call
         if can_raise:
             max_to = self.bets[seat] + stack
             if self.config.variant.pot_limit:
                 max_to = min(max_to, highest + sum(self.contrib) + to_call)
-            min_to = min(highest + min_raise, max_to)
+            min_to = min(highest + max(self.bb, largest_raise), max_to)
         else:
             min_to = max_to = 0
         facing = to_call > 0
@@ -316,14 +337,16 @@ class _Hand:
             variant = self.config.variant
             scores = {s: best_hand(self.holes[s], self.full_board, variant) for s in contenders}
             shown = {s: self.holes[s] for s in contenders}
-            # Pay winners left of the button first so odd chips land there.
+            # The whole odd-chip remainder goes to the first winner left of the
+            # button (PokerKit's convention; PLACEHOLDER(kit)).
             by_position = sorted(contenders, key=lambda s: (s - self.button - 1) % n)
             for amount, eligible in self._pots(contenders):
                 best = max(scores[s] for s in eligible)
                 winners = [s for s in by_position if s in eligible and scores[s] == best]
                 share, odd = divmod(amount, len(winners))
-                for i, s in enumerate(winners):
-                    stacks[s] += share + (1 if i < odd else 0)
+                for s in winners:
+                    stacks[s] += share
+                stacks[winners[0]] += odd
                 won.update(winners)
 
         result = HandResult(self.hand_number, tuple(stacks), shown, tuple(sorted(won)))

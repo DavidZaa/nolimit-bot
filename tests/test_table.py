@@ -53,6 +53,34 @@ def test_big_blind_gets_its_option_after_limps():
     assert bb_state.legal.min_raise_to == 40
 
 
+def test_big_blind_still_gets_asked_when_everyone_else_is_all_in():
+    # Button calls all-in for 7, SB folds. Nothing is left to bet into, but the
+    # BB still gets its turn (check only), as PokerKit does mid-street.
+    bots = [Scripted(Action(CALL)), Scripted(Action(FOLD)), Scripted()]
+    play(bots, [7, 420, 52], {0: "2c3d", 1: "4c5d", 2: "6c7d"}, "AsKsQhJdTc",
+         config=cfg(sb=25, bb=50))
+    assert len(bots[2].seen) == 1
+    legal = bots[2].seen[0].legal
+    assert legal.can_check and not legal.can_raise
+
+
+def test_big_blind_not_asked_when_already_covering_every_opponent():
+    # Heads-up, the button has 47 total and the BB already posted 50: the BB has
+    # nothing left to decide, so it never gets a turn.
+    bots = [Scripted(), Scripted(Action(CALL))]
+    out = play(bots, [1358, 47], {0: "2c3d", 1: "4c5d"}, "9h5s4hJs6s", button=1, config=cfg(sb=25, bb=50))
+    assert bots[0].seen == []
+    assert sum(out.stacks) == 1405
+
+
+def test_no_betting_rounds_after_everyone_but_one_is_all_in():
+    bots = [Scripted(Action(RAISE, 500)), Scripted(Action(CALL)), Scripted(Action(FOLD))]
+    out = play(bots, [500, 2000, 2000], {0: "AsAd", 1: "2c3d", 2: "6c7d"}, "Ks9h7d4c2s", button=2)
+    # SB shoves, BB calls with chips behind; no flop/turn/river decisions follow.
+    assert all(st.street == 0 for b in bots for st in b.seen)
+    assert out.stacks[0] == 1000
+
+
 def test_forced_bets_are_logged_and_short_blinds_post_all_in():
     bots = [Scripted(), Scripted(), Scripted()]
     out = play(bots, [1000, 1000, 15], {0: "2c3d", 1: "4c5d", 2: "6c7d"}, "AsKsQhJdTc")
@@ -92,6 +120,25 @@ def test_full_raise_does_reopen_betting():
     assert facing.legal.can_raise and facing.legal.min_raise_to == 260
 
 
+def test_no_raising_when_nobody_could_call_more():
+    # Seat 3 shoves 1000. The blinds still have chips, but neither can put in
+    # more than 1000, so seat 0 may only call or fold.
+    bots = [Scripted(), Scripted(), Scripted(), Scripted(Action(RAISE, 1000))]
+    play(bots, [2000, 600, 400, 1000], {0: "2c3d", 1: "4c5d", 2: "6c7d", 3: "8c9d"}, "AsKsQhJdTc")
+    legal = bots[0].seen[0].legal
+    assert legal.can_call and not legal.can_raise
+
+
+def test_short_all_ins_that_add_up_to_a_full_raise_reopen_betting():
+    # Seat 3 opens to 100 (an 80 raise). Two short all-ins (+50, +60) add up to
+    # more than 80, so when it comes back seat 3 may raise again (PokerKit rule).
+    s3 = Scripted(Action(RAISE, 100))
+    bots = [Scripted(Action(RAISE, 150)), Scripted(Action(RAISE, 210)), Scripted(Action(CALL)), s3]
+    play(bots, [150, 210, 2000, 2000], {0: "2c3d", 1: "4c5d", 2: "6c7d", 3: "8c9d"}, "AsKsQhJdTc")
+    facing = s3.seen[1].legal
+    assert facing.can_raise and facing.min_raise_to == 290
+
+
 def test_short_stack_can_only_raise_all_in():
     bots = [Scripted(), Scripted(), Scripted()]
     # button 2 -> SB 0, BB 1, so the 30-chip button is first to act facing 20
@@ -124,6 +171,15 @@ def test_split_pot_odd_chip_goes_left_of_button():
     out = play(bots, [1000] * 3, {0: "2c3d", 1: "AsKd", 2: "AhKc"}, "QsJh7d2s3s",
                config=cfg(sb=5, bb=10, ante=1))
     assert out.stacks == [999, 1001, 1000]
+
+
+def test_three_way_chop_gives_whole_remainder_to_first_left_of_button():
+    # Antes of 2 make a 38-chip pot; three players chop a royal on board: 12 each,
+    # and both leftover chips go to the SB (PokerKit's convention).
+    bots = [Scripted(Action(FOLD)), Scripted(Action(CALL)), Scripted(Action(CHECK)), Scripted(Action(CALL))]
+    out = play(bots, [1000] * 4, {0: "2c3d", 1: "4c5d", 2: "6c7d", 3: "8c9d"}, "AsKsQsJsTs",
+               config=cfg(sb=5, bb=10, ante=2))
+    assert out.stacks == [998, 1002, 1000, 1000]
 
 
 def test_crashes_junk_and_timeouts_become_check_or_fold():
