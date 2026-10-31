@@ -1,0 +1,108 @@
+"""Our own view of the game: the types every strategy component is written against.
+
+The real starter kit arrives on event day with its own Agent interface. Rather
+than guess at it everywhere, strategy code only ever sees these types, and
+adapter.py translates the kit's objects into them. Swapping kits then touches
+one file instead of all of them.
+
+Cards are ints: rank * 4 + suit, rank 0..12 meaning 2..A, suit 0..3 meaning
+c, d, h, s. That keeps rank (c >> 2) and suit (c & 3) one instruction away,
+which matters inside a 1 ms decision budget.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import NamedTuple
+
+RANK_CHARS = "23456789TJQKA"
+SUIT_CHARS = "cdhs"
+
+PREFLOP, FLOP, TURN, RIVER = 0, 1, 2, 3
+
+FOLD = "fold"
+CHECK = "check"
+CALL = "call"
+RAISE = "raise"
+
+# Forced bets show up in the action log too, so trackers can tell a blind from a call.
+POST_SB = "sb"
+POST_BB = "bb"
+POST_ANTE = "ante"
+
+
+def card_from_str(s: str) -> int:
+    if len(s) != 2 or s[0] not in RANK_CHARS or s[1] not in SUIT_CHARS:
+        raise ValueError(f"not a card: {s!r}")
+    return RANK_CHARS.index(s[0]) * 4 + SUIT_CHARS.index(s[1])
+
+
+def card_to_str(c: int) -> str:
+    return RANK_CHARS[c >> 2] + SUIT_CHARS[c & 3]
+
+
+def cards_from_str(s: str) -> tuple[int, ...]:
+    s = s.replace(" ", "")
+    return tuple(card_from_str(s[i : i + 2]) for i in range(0, len(s), 2))
+
+
+class Action(NamedTuple):
+    kind: str
+    # For RAISE: the total this player's bet becomes on this street ("raise to").
+    # Opening bets are raises from zero. Ignored for the other kinds.
+    amount: int = 0
+
+
+class LegalActions(NamedTuple):
+    can_fold: bool  # only when there is something to call
+    can_check: bool
+    can_call: bool
+    call_amount: int  # chips added by calling; may be less than the bet if all-in
+    can_raise: bool
+    min_raise_to: int  # equals max_raise_to when the only raise is a short all-in
+    max_raise_to: int
+
+
+class ActionRecord(NamedTuple):
+    seat: int
+    street: int
+    kind: str  # FOLD/CHECK/CALL/RAISE or a forced post (POST_SB/POST_BB/POST_ANTE)
+    amount: int  # street bet total after the action (chips posted, for antes)
+
+
+@dataclass(frozen=True, slots=True)
+class GameState:
+    hand_number: int  # 1-based, counts hands played at this table
+    seat: int  # whose decision this is
+    num_seats: int
+    button: int
+    sb_seat: int
+    bb_seat: int
+    small_blind: int
+    big_blind: int
+    ante: int
+    street: int
+    hole: tuple[int, ...]
+    board: tuple[int, ...]
+    stacks: tuple[int, ...]  # chips behind, per seat; 0 for busted or all-in seats
+    bets: tuple[int, ...]  # chips put in on the current street, per seat
+    pot: int  # everything committed this hand, current street bets included
+    in_hand: tuple[bool, ...]  # dealt in and not folded
+    players_left: int  # seats that still have chips at the table
+    legal: LegalActions
+    actions: tuple[ActionRecord, ...]  # this hand so far, forced posts included
+
+
+@dataclass(frozen=True, slots=True)
+class HandResult:
+    hand_number: int
+    stacks_after: tuple[int, ...]
+    shown: dict[int, tuple[int, ...]]  # seat -> hole cards, only for showdown hands
+    winners: tuple[int, ...]
+
+
+def fallback_action(legal: LegalActions) -> Action:
+    """The same thing the tournament does on an error or timeout."""
+    if legal.can_check:
+        return Action(CHECK)
+    return Action(FOLD)
