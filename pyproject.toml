@@ -1,0 +1,26 @@
+[project]
+name = "nolimit-bot"
+version = "0.1.0"
+description = "Tournament pokerbot toolkit: a sit-and-go simulator plus a fast, always-legal bot core."
+requires-python = ">=3.10"
+dependencies = []
+
+[project.optional-dependencies]
+dev = [
+    "pytest==9.1.1",
+    "pokerkit==0.7.7",
+]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["bot*", "engine*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-m 'not slow'"
+markers = [
+    "slow: large fuzz and latency runs (run with -m slow)",
+]
