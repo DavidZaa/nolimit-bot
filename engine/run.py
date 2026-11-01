@@ -81,13 +81,22 @@ class BotSummary:
         return 1.96 * math.sqrt(var / n)
 
 
+def seat_table(lineup, seed: int, table: int) -> tuple[int, list[str], list]:
+    """(table seed, bot name per seat, fresh bots) for table number `table` of a run.
+
+    The hand viewer seats tables through this too, so any table from a run
+    can be replayed card for card.
+    """
+    table_seed = seed * 1_000_003 + table
+    names = list(lineup)
+    random.Random(table_seed).shuffle(names)
+    return table_seed, names, [BOTS[name](table_seed * 16 + s) for s, name in enumerate(names)]
+
+
 def _run_chunk(lineup, start: int, count: int, seed: int, config: TableConfig) -> dict[str, BotSummary]:
     out = {name: BotSummary() for name in lineup}
     for t in range(start, start + count):
-        table_seed = seed * 1_000_003 + t
-        names = list(lineup)
-        random.Random(table_seed).shuffle(names)
-        bots = [BOTS[name](table_seed * 16 + s) for s, name in enumerate(names)]
+        table_seed, names, bots = seat_table(lineup, seed, t)
         res = play_sng(bots, config, seed=table_seed)
         st = res.stats
         for s, name in enumerate(names):
@@ -147,9 +156,8 @@ def format_report(summaries: dict[str, BotSummary], tables: int, config: TableCo
     return "\n".join(lines)
 
 
-def main(argv=None) -> None:
-    p = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    p.add_argument("--tables", type=int, default=1000)
+def add_table_args(p: argparse.ArgumentParser) -> None:
+    """Flags shared by every command that plays tables."""
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--lineup", default="baseline:4,random:2,station,maniac")
     p.add_argument("--variant", choices=sorted(VARIANTS), default="nlhe")
@@ -157,18 +165,28 @@ def main(argv=None) -> None:
     p.add_argument("--payouts", default=",".join(str(x) for x in PLACEHOLDER_PAYOUTS),
                    help="points by finishing place, 1st first")
     p.add_argument("--max-hands", type=int, default=200)
-    p.add_argument("--workers", type=int, default=1)
     p.add_argument("--no-enforce-time", action="store_true",
                    help="don't auto-fold decisions slower than 1 ms (e.g. on a busy laptop)")
-    args = p.parse_args(argv)
 
-    config = TableConfig(
+
+def table_config(args: argparse.Namespace) -> TableConfig:
+    return TableConfig(
         variant=VARIANTS[args.variant],
         schedule=SCHEDULES[args.schedule],
         payouts=tuple(float(x) for x in args.payouts.split(",")),
         max_hands=args.max_hands,
         enforce_time=not args.no_enforce_time,
     )
+
+
+def main(argv=None) -> None:
+    p = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
+    p.add_argument("--tables", type=int, default=1000)
+    p.add_argument("--workers", type=int, default=1)
+    add_table_args(p)
+    args = p.parse_args(argv)
+
+    config = table_config(args)
     summaries = run_tables(parse_lineup(args.lineup), args.tables, args.seed, config, args.workers)
     print(format_report(summaries, args.tables, config))
 
