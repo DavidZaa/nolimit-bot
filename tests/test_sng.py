@@ -98,6 +98,17 @@ def test_new_table_hook_is_called_with_seat():
     assert [b.seat for b in bots] == [(s, 8) for s in range(8)]
 
 
+def test_on_hand_sees_every_hand_in_order_with_matching_stacks():
+    seen = []
+    bots = [RandomLegal(seed=s) for s in range(8)]
+    res = play_sng(bots, TableConfig(payouts=PAYOUTS), seed=9,
+                   on_hand=lambda number, before, out: seen.append((number, before, out.stacks)))
+    assert [number for number, _, _ in seen] == list(range(1, res.hands_played + 1))
+    assert seen[0][1] == [2000] * 8
+    for (_, _, after), (_, before, _) in zip(seen, seen[1:]):
+        assert before == after  # each hand starts where the last one left off
+
+
 def test_blinds_follow_the_schedule():
     seen = []
 

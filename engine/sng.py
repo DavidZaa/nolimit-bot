@@ -51,7 +51,8 @@ def assign_places(seats, key_stacks, best_place: int, payouts) -> dict[int, tupl
     return out
 
 
-def play_sng(bots, config: TableConfig, seed: int) -> SngResult:
+def play_sng(bots, config: TableConfig, seed: int, on_hand=None) -> SngResult:
+    """`on_hand(hand_number, stacks_before, outcome)` runs after every hand (for viewers)."""
     n = config.seats
     rng = random.Random(seed)
     stats = TableStats(n)
@@ -75,7 +76,9 @@ def play_sng(bots, config: TableConfig, seed: int) -> SngResult:
         before = stacks
         out = play_hand(bots, stacks, button, hands, config, rng, stats=stats)
         stacks = out.stacks
-        busted = [s for s in range(n) if before[s] > 0 and stacks[s] == 0]
+        if on_hand is not None:
+            on_hand(hands, before, out)
+        busted =[s for s in range(n) if before[s] > 0 and stacks[s] == 0]
         if busted:
             best = worst_open_place - len(busted) + 1
             for s, (place, pts) in assign_places(busted, before, best, config.payouts).items():
