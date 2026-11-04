@@ -38,14 +38,46 @@ def _level(cards) -> int:
     return _TWO_PAIR if pairs >= 2 else _PAIR if pairs else _HIGH
 
 
+_WHEEL = frozenset((12, 0, 1, 2, 3))
+
+
+def _omaha_level(hole, board) -> int:
+    """Best level over every two-from-the-hand, three-from-the-board five.
+
+    Each five is classified by how many distinct ranks it has (5: straight,
+    flush or nothing; 4: a pair; 3: trips or two pair; fewer: full house or
+    quads), which is far cheaper than counting, and the search stops at the
+    first strong five.
+    """
+    pairs = [((a >> 2, b >> 2), a & 3 if a & 3 == b & 3 else -1) for a, b in combinations(hole, 2)]
+    best = _HIGH
+    for x, y, z in combinations(board, 3):
+        b_ranks = (x >> 2, y >> 2, z >> 2)
+        b_suit = x & 3 if x & 3 == y & 3 == z & 3 else -2
+        for h_ranks, h_suit in pairs:
+            ranks = {*b_ranks, *h_ranks}
+            distinct = len(ranks)
+            if distinct == 5:
+                if h_suit == b_suit or max(ranks) - min(ranks) == 4 or ranks == _WHEEL:
+                    return _STRONG
+            elif distinct == 4:
+                if best == _HIGH:
+                    best = _PAIR
+            elif distinct == 3:
+                five = b_ranks + h_ranks
+                if any(five.count(r) == 3 for r in ranks):
+                    return _STRONG
+                best = _TWO_PAIR
+            else:
+                return _STRONG
+    return best
+
+
 def made_hand(hole, board) -> int:
     """Bucket a postflop hand. A pair that's only on the board counts as nothing."""
     if len(hole) + len(board) < 5:
         return NOTHING
-    if len(hole) == 4:
-        level = max(_level((*h, *b)) for h in combinations(hole, 2) for b in combinations(board, 3))
-    else:
-        level = _level((*hole, *board))
+    level = _omaha_level(hole, board) if len(hole) == 4 else _level((*hole, *board))
     if level == _STRONG:
         return MONSTER
     if level == _TWO_PAIR:

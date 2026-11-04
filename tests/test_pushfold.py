@@ -43,6 +43,16 @@ def test_hand_reader_agrees_with_the_engine_evaluator(hole_size):
         assert made_hand(hole, board) == field.made_hand(hole, board), (hole, board)
 
 
+@pytest.mark.slow
+@pytest.mark.parametrize("hole_size", [2, 4])
+def test_hand_reader_agrees_with_the_engine_evaluator_at_scale(hole_size):
+    rng = random.Random(100 + hole_size)
+    for _ in range(300_000):
+        deck = rng.sample(range(52), hole_size + 5)
+        hole, board = deck[:hole_size], deck[hole_size : hole_size + rng.choice((3, 4, 5))]
+        assert made_hand(hole, board) == field.made_hand(hole, board), (hole, board)
+
+
 def test_hand_reader_survives_missing_cards():
     assert made_hand((), ()) == NOTHING
     assert made_hand(cards_from_str("As"), cards_from_str("Kh7s")) == NOTHING
