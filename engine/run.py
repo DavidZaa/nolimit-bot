@@ -88,15 +88,21 @@ class BotSummary:
         return 1.96 * math.sqrt(var / n)
 
 
-def seat_table(lineup, seed: int, table: int) -> tuple[int, list[str], list]:
-    """(table seed, bot name per seat, fresh bots) for table number `table` of a run.
-
-    The hand viewer seats tables through this too, so any table from a run
-    can be replayed card for card.
-    """
+def seat_names(lineup, seed: int, table: int) -> tuple[int, list[str]]:
+    """(table seed, bot name per seat) for table number `table` of a run."""
     table_seed = seed * 1_000_003 + table
     names = list(lineup)
     random.Random(table_seed).shuffle(names)
+    return table_seed, names
+
+
+def seat_table(lineup, seed: int, table: int) -> tuple[int, list[str], list]:
+    """(table seed, bot name per seat, fresh bots) for table number `table` of a run.
+
+    The hand viewer and the paired comparison seat tables through this too,
+    so any table from a run can be replayed card for card.
+    """
+    table_seed, names = seat_names(lineup, seed, table)
     return table_seed, names, [BOTS[name](table_seed * 16 + s) for s, name in enumerate(names)]
 
 

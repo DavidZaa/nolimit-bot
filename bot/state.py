@@ -99,6 +99,9 @@ class HandResult:
     stacks_after: tuple[int, ...]
     shown: dict[int, tuple[int, ...]]  # seat -> hole cards, only for showdown hands
     winners: tuple[int, ...]
+    # The whole hand, forced posts included. PLACEHOLDER(kit): a kit may not
+    # report this; the tracker falls back to what it saw in GameState.actions.
+    actions: tuple[ActionRecord, ...] = ()
 
 
 def fallback_action(legal: LegalActions) -> Action:
