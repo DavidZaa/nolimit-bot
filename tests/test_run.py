@@ -41,3 +41,4 @@ def test_cli_prints_a_report(capsys):
     main(["--tables", "4", "--lineup", "baseline:4,random:4", "--seed", "2"])
     out = capsys.readouterr().out
     assert "baseline" in out and "random" in out and "p99.9" in out
+    assert "timed on cpu clock" in out or "timed on wall clock" in out

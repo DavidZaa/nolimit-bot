@@ -25,6 +25,7 @@ from engine.field import CallingStation, ChenTAG, EquityCaller, FolderBot, Mania
 from engine.latency import LatencyHistogram
 from engine.rules import PLACEHOLDER_PAYOUTS, SCHEDULES, VARIANTS, TableConfig
 from engine.sng import play_sng
+from engine.table import CLOCK_NAME
 
 BOTS = {
     "ours": lambda seed: SafeBot(PushFoldBot()),  # what adapter.build_bot() submits
@@ -148,7 +149,8 @@ def run_tables(
 
 def format_report(summaries: dict[str, BotSummary], tables: int, config: TableConfig) -> str:
     lines = [
-        f"{tables} tables | {config.variant.name} | payouts {list(config.payouts)}",
+        f"{tables} tables | {config.variant.name} | payouts {list(config.payouts)}"
+        f" | timed on {CLOCK_NAME} clock",
         f"{'bot':<14}{'pts/table':>10}{'±95%':>8}{'win%':>7}{'decisions':>11}"
         f"{'p50µs':>7}{'p99.9µs':>9}{'maxµs':>8}{'err':>6}{'slow':>6}{'illegal':>8}",
     ]

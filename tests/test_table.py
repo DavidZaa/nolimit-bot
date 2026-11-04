@@ -1,9 +1,13 @@
 import random
 import time
+from time import perf_counter_ns
+
+import pytest
 
 from bot.state import CALL, CHECK, FOLD, POST_ANTE, POST_BB, POST_SB, RAISE, Action
 from bot.state import cards_from_str as C
 from engine.rules import BlindSchedule, TableConfig
+from engine import table
 from engine.table import TableStats, blind_seats, play_hand
 from helpers import Exploding, RandomLegal, ReturnsJunk, Scripted
 
@@ -217,6 +221,7 @@ def test_slow_decisions_are_treated_as_timeouts():
     assert out.stacks == [990, 1010]
 
 
+@pytest.mark.skipif(table.CLOCK_NAME != "cpu", reason="coarse CPU clock here; engine times on the wall")
 def test_time_the_os_spends_elsewhere_does_not_count():
     # Sleeping stands in for being descheduled on a busy machine: it uses no
     # CPU on the bot's thread, so it must not cost the bot its decision.
@@ -225,6 +230,17 @@ def test_time_the_os_spends_elsewhere_does_not_count():
     out = play([paused, Scripted()], [1000, 1000], {0: "AsAd", 1: "2c3d"}, "KsQh7d4c9s", stats=stats)
     assert stats.timeouts[0] == 0
     assert out.stacks == [1020, 980]  # the shove stands and wins the big blind
+
+
+def test_a_coarse_cpu_clock_falls_back_to_wall_time():
+    windows_like = lambda: perf_counter_ns() // 15_625_000 * 15_625_000  # ticks every 15.6 ms
+    assert table.pick_decision_clock(cpu=windows_like) == (perf_counter_ns, "wall")
+    assert table.pick_decision_clock(cpu=perf_counter_ns) == (perf_counter_ns, "cpu")  # fine enough
+
+
+def test_clock_step_sees_how_often_a_clock_really_ticks():
+    assert table.clock_step_ns(lambda: perf_counter_ns() // 1_000 * 1_000) == 1_000
+    assert table.clock_step_ns(lambda: 42) is None
 
 
 def test_chips_are_conserved_over_random_hands():

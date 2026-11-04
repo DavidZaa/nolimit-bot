@@ -12,15 +12,18 @@ check when checking is free and a fold otherwise.
 
 Decisions are timed in CPU time on the bot's thread: everything the bot's
 own code costs, garbage collection included, but not the time a busy laptop
-or a pool of parallel workers keeps the process off the CPU. Wall-clock
-latency is measured separately, on a quiet process, by tests/test_timing.py.
+or a pool of parallel workers keeps the process off the CPU. Some platforms
+(Windows) only update that clock every ~15.6 ms, which would read most
+decisions as free and a few as timeouts, so on import the clock is checked
+and wall time is used instead when it's that coarse. Wall-clock latency on a
+quiet process is measured separately by tests/test_timing.py.
 """
 
 from __future__ import annotations
 
 import random
 from dataclasses import dataclass
-from time import thread_time_ns
+from time import perf_counter_ns, thread_time_ns
 
 from bot.state import (
     CALL,
@@ -40,6 +43,36 @@ from bot.state import (
 from engine.handeval import best_hand
 from engine.latency import LatencyHistogram
 from engine.rules import TableConfig
+
+
+def clock_step_ns(clock, spin_ns: int = 2_000_000) -> int | None:
+    """Smallest step `clock` takes while spinning for up to `spin_ns` of wall time.
+
+    None if it never moved. Asking the OS isn't enough: Windows reports its
+    thread clock's units (100 ns), not how often it actually ticks.
+    """
+    end = perf_counter_ns() + spin_ns
+    last = clock()
+    step = None
+    changes = 0
+    while changes < 20 and perf_counter_ns() < end:
+        now = clock()
+        if now != last:
+            step = now - last if step is None else min(step, now - last)
+            last = now
+            changes += 1
+    return step
+
+
+def pick_decision_clock(cpu=thread_time_ns, fine_ns: int = 10_000):
+    """(clock, name): the thread CPU clock if it ticks finer than `fine_ns`, else wall time."""
+    step = clock_step_ns(cpu)
+    if step is not None and step <= fine_ns:
+        return cpu, "cpu"
+    return perf_counter_ns, "wall"
+
+
+decision_clock, CLOCK_NAME = pick_decision_clock()
 
 
 class TableStats:
@@ -275,13 +308,14 @@ class _Hand:
         )
         bot = self.bots[seat]
         failed = False
-        t0 = thread_time_ns()
+        clock = decision_clock
+        t0 = clock()
         try:
             action = bot.act(state)
         except Exception:
             failed = True
             action = None
-        elapsed = thread_time_ns() - t0
+        elapsed = clock() - t0
 
         stats = self.stats
         config = self.config
