@@ -19,6 +19,7 @@ from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass, field
 
 from bot.baseline import BaselineBot
+from bot.policy import FEATURES, PolicyBot
 from bot.pushfold import PushFoldBot
 from bot.safety import SafeBot
 from engine.field import CallingStation, ChenTAG, EquityCaller, FolderBot, Maniac, PushFold, RandomBot
@@ -38,7 +39,11 @@ BOTS = {
     "tag": lambda seed: ChenTAG(),
     "equity": lambda seed: EquityCaller(),
     "pushfold": lambda seed: PushFold(),
+    "policy": lambda seed: SafeBot(PolicyBot()),
 }
+# One feature at a time, for measuring each adjustment on its own.
+for _feature in FEATURES:
+    BOTS[f"policy_{_feature}"] = lambda seed, f=_feature: SafeBot(PolicyBot(features=(f,)))
 
 
 def parse_lineup(spec: str) -> list[str]:

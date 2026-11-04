@@ -16,6 +16,7 @@ import os
 import pytest
 
 from bot.baseline import BaselineBot
+from bot.policy import PolicyBot
 from bot.pushfold import PushFoldBot
 from bot.runtime import tune_gc
 from bot.safety import SafeBot
@@ -26,13 +27,26 @@ from engine.sng import play_sng
 from time import perf_counter_ns
 
 BUDGET_P999_US = 200  # target from the design: far under the 1 ms limit
-BOTS = {"baseline": BaselineBot, "pushfold": PushFoldBot}
+BOTS = {"baseline": BaselineBot, "pushfold": PushFoldBot, "policy": PolicyBot}
 
 
 class Recorder:
+    """Records every state the bot sees and passes the table hooks through, so a
+    tracker-driven bot plays (and is recorded) with a real tracker."""
+
     def __init__(self, inner, sink):
         self.inner = inner
         self.sink = sink
+
+    def new_table(self, seat, num_seats):
+        hook = getattr(self.inner, "new_table", None)
+        if hook:
+            hook(seat, num_seats)
+
+    def hand_over(self, result):
+        hook = getattr(self.inner, "hand_over", None)
+        if hook:
+            hook(result)
 
     def act(self, state):
         self.sink.append(state)

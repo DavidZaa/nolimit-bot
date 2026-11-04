@@ -13,6 +13,7 @@ import random
 import pytest
 
 from bot.baseline import BaselineBot, preflop_percentile
+from bot.policy import PolicyBot
 from bot.pushfold import PushFoldBot
 from bot.safety import SafeBot, make_legal
 from bot.state import (
@@ -186,9 +187,9 @@ def random_state(rng):
 
 def _fuzz_states(count, seed):
     rng = random.Random(seed)
-    raw = [BaselineBot(), PushFoldBot()]
+    raw = [BaselineBot(), PushFoldBot(), PolicyBot()]
     wrapped = [SafeBot(Hostile(m, seed=i)) for i, m in enumerate(MODES)]
-    safe = [SafeBot(BaselineBot()), SafeBot(PushFoldBot())]
+    safe = [SafeBot(BaselineBot()), SafeBot(PushFoldBot()), SafeBot(PolicyBot())]
     for _ in range(count):
         st = random_state(rng)
         # our raw bots may misjudge junk states, but must never crash
