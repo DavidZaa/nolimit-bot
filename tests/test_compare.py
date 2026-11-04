@@ -29,6 +29,13 @@ def test_pairing_finds_a_real_edge_quickly():
     assert 0 < c.variance_removed < 1
 
 
+@pytest.mark.slow
+def test_the_submitted_bot_still_beats_the_previous_one():
+    # The policy replaced push/fold (v3) on a +3.7 ± 0.8 edge over 4,000 tables.
+    c = compare("ours", "v3", LINEUP, tables=2000, config=CONFIG, workers=4)
+    assert c.mean_diff - c.ci95 > 0, (c.mean_diff, c.ci95)
+
+
 def test_parallel_matches_serial():
     serial = compare("ours", "baseline", LINEUP, tables=8, seed=3, config=CONFIG)
     parallel = compare("ours", "baseline", LINEUP, tables=8, seed=3, config=CONFIG, workers=2)

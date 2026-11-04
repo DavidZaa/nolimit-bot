@@ -29,7 +29,8 @@ from engine.sng import play_sng
 from engine.table import CLOCK_NAME
 
 BOTS = {
-    "ours": lambda seed: SafeBot(PushFoldBot()),  # what adapter.build_bot() submits
+    "ours": lambda seed: SafeBot(PolicyBot()),  # what adapter.build_bot() submits
+    "v3": lambda seed: SafeBot(PushFoldBot()),  # the previous submission, for comparisons
     "baseline": lambda seed: SafeBot(BaselineBot()),
     "baseline_raw": lambda seed: BaselineBot(),
     "random": lambda seed: RandomBot(seed),

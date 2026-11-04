@@ -20,7 +20,7 @@ raised, for shove ranges and continuation bets) and can be left empty.
 
 from __future__ import annotations
 
-from bot.pushfold import PushFoldBot
+from bot.policy import PolicyBot
 from bot.runtime import tune_gc
 from bot.safety import SafeBot
 from bot.state import (
@@ -29,12 +29,13 @@ from bot.state import (
 
 
 def build_bot():
-    """The policy we play: push/fold until the tracker-driven policy beats it.
+    """The policy we play: push/fold adjusted per seat by the opponent tracker.
 
-    bot.baseline.BaselineBot is the simpler fallback if this ever misbehaves
-    against the real kit.
+    Fallbacks if it misbehaves against the real kit, in order:
+    bot.pushfold.PushFoldBot (same strategy, no tracker), then
+    bot.baseline.BaselineBot.
     """
-    return SafeBot(PushFoldBot())
+    return SafeBot(PolicyBot())
 
 
 def legal_actions(to_call: int, stack: int, min_raise_to: int, max_raise_to: int,
