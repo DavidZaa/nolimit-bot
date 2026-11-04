@@ -9,13 +9,18 @@ left of the button.
 Bots are called the way the tournament calls them: each decision is timed,
 and an exception, an illegal action or (if enforced) a slow answer becomes a
 check when checking is free and a fold otherwise.
+
+Decisions are timed in CPU time on the bot's thread: everything the bot's
+own code costs, garbage collection included, but not the time a busy laptop
+or a pool of parallel workers keeps the process off the CPU. Wall-clock
+latency is measured separately, on a quiet process, by tests/test_timing.py.
 """
 
 from __future__ import annotations
 
 import random
 from dataclasses import dataclass
-from time import perf_counter_ns
+from time import thread_time_ns
 
 from bot.state import (
     CALL,
@@ -270,13 +275,13 @@ class _Hand:
         )
         bot = self.bots[seat]
         failed = False
-        t0 = perf_counter_ns()
+        t0 = thread_time_ns()
         try:
             action = bot.act(state)
         except Exception:
             failed = True
             action = None
-        elapsed = perf_counter_ns() - t0
+        elapsed = thread_time_ns() - t0
 
         stats = self.stats
         config = self.config

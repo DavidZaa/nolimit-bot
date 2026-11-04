@@ -4,8 +4,9 @@
 
 Every table reseats the lineup at random and builds fresh bots (state resets
 per table, as in the tournament). Results are average points per table per
-bot, with a 95% confidence interval, plus decision latency and how often the
-tournament would have auto-folded each bot.
+bot, with a 95% confidence interval, plus decision time (CPU time, so a busy
+machine doesn't inflate it) and how often the tournament would have
+auto-folded each bot.
 """
 
 from __future__ import annotations
@@ -169,7 +170,7 @@ def add_table_args(p: argparse.ArgumentParser) -> None:
                    help="points by finishing place, 1st first")
     p.add_argument("--max-hands", type=int, default=200)
     p.add_argument("--no-enforce-time", action="store_true",
-                   help="don't auto-fold decisions slower than 1 ms (e.g. on a busy laptop)")
+                   help="don't auto-fold decisions that take more than 1 ms of CPU")
 
 
 def table_config(args: argparse.Namespace) -> TableConfig:

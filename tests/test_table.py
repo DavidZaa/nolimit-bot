@@ -1,4 +1,5 @@
 import random
+import time
 
 from bot.state import CALL, CHECK, FOLD, POST_ANTE, POST_BB, POST_SB, RAISE, Action
 from bot.state import cards_from_str as C
@@ -192,13 +193,38 @@ def test_crashes_junk_and_timeouts_become_check_or_fold():
     assert sum(stats.decisions) == 2
 
 
+class Thinks:
+    """Answers `action` after spending `ms` either computing or asleep."""
+
+    def __init__(self, action, ms, busy=True):
+        self.action, self.ns, self.busy = action, int(ms * 1e6), busy
+
+    def act(self, state):
+        if self.busy:
+            end = time.thread_time_ns() + self.ns
+            while time.thread_time_ns() < end:
+                pass
+        else:
+            time.sleep(self.ns / 1e9)
+        return self.action
+
+
 def test_slow_decisions_are_treated_as_timeouts():
     stats = TableStats(2)
-    slow = Scripted(Action(RAISE, 1000))
-    out = play([slow, Scripted()], [1000, 1000], {0: "AsAd", 1: "2c3d"}, "KsQh7d4c9s",
-               config=cfg(time_limit_ns=0), stats=stats)
+    slow = Thinks(Action(RAISE, 1000), ms=2)
+    out = play([slow, Scripted()], [1000, 1000], {0: "AsAd", 1: "2c3d"}, "KsQh7d4c9s", stats=stats)
     assert stats.timeouts[0] == 1
     assert out.stacks == [990, 1010]
+
+
+def test_time_the_os_spends_elsewhere_does_not_count():
+    # Sleeping stands in for being descheduled on a busy machine: it uses no
+    # CPU on the bot's thread, so it must not cost the bot its decision.
+    stats = TableStats(2)
+    paused = Thinks(Action(RAISE, 1000), ms=3, busy=False)
+    out = play([paused, Scripted()], [1000, 1000], {0: "AsAd", 1: "2c3d"}, "KsQh7d4c9s", stats=stats)
+    assert stats.timeouts[0] == 0
+    assert out.stacks == [1020, 980]  # the shove stands and wins the big blind
 
 
 def test_chips_are_conserved_over_random_hands():
