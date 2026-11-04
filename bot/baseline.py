@@ -32,6 +32,14 @@ def _chen(hi: int, lo: int, suited: bool) -> float:
     return score
 
 
+def chen_score(hole) -> float:
+    """Raw Chen points for two hole cards: AA 20, AKs 12, 72o -1.5."""
+    a, b = hole
+    ra, rb = a >> 2, b >> 2
+    hi, lo = (ra, rb) if ra >= rb else (rb, ra)
+    return _chen(hi, lo, (a & 3) == (b & 3))
+
+
 def _build_percentiles() -> list[float]:
     classes = []
     for hi in range(13):

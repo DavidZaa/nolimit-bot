@@ -19,7 +19,7 @@ from dataclasses import dataclass, field
 
 from bot.baseline import BaselineBot
 from bot.safety import SafeBot
-from engine.field import CallingStation, FolderBot, Maniac, RandomBot
+from engine.field import CallingStation, ChenTAG, EquityCaller, FolderBot, Maniac, PushFold, RandomBot
 from engine.latency import LatencyHistogram
 from engine.rules import PLACEHOLDER_PAYOUTS, SCHEDULES, VARIANTS, TableConfig
 from engine.sng import play_sng
@@ -31,6 +31,9 @@ BOTS = {
     "station": lambda seed: CallingStation(),
     "maniac": lambda seed: Maniac(),
     "folder": lambda seed: FolderBot(),
+    "tag": lambda seed: ChenTAG(),
+    "equity": lambda seed: EquityCaller(),
+    "pushfold": lambda seed: PushFold(),
 }
 
 
