@@ -6,6 +6,9 @@ Everything else is written against bot.state. On kit day:
      how actions are returned, how cards are written.
   2. Rename/re-sign `Agent` below to match the template exactly.
   3. Fill in `to_game_state` and `to_kit_action` (the PLACEHOLDER(kit) spots).
+     If the kit reports finished hands, fill in `to_hand_result` and call
+     `Agent.hand_over` from its end-of-hand hook: the opponent tracker then
+     sees what happened after we folded, not just the hands we played.
   4. Run `pytest tests/test_adapter.py` plus a few hands in the kit's own
      simulator, then submit. The bot behind it is already tested.
 
@@ -20,7 +23,9 @@ from __future__ import annotations
 from bot.pushfold import PushFoldBot
 from bot.runtime import tune_gc
 from bot.safety import SafeBot
-from bot.state import CALL, CHECK, FOLD, RAISE, Action, GameState, LegalActions, card_from_str
+from bot.state import (
+    CALL, CHECK, FOLD, RAISE, Action, GameState, HandResult, LegalActions, card_from_str,
+)
 
 
 def build_bot():
@@ -56,6 +61,12 @@ def to_game_state(observation) -> GameState:
     raise NotImplementedError("map the kit observation into bot.state.GameState")
 
 
+def to_hand_result(kit_result) -> HandResult:
+    """PLACEHOLDER(kit): map the kit's end-of-hand report (stacks, shown cards, the
+    hand's actions) into a HandResult. Leave `actions` empty if it has none."""
+    raise NotImplementedError("map the kit's hand report into bot.state.HandResult")
+
+
 def to_kit_action(action: Action, observation):
     """PLACEHOLDER(kit): turn our Action into whatever the kit expects back."""
     kind = action.kind
@@ -78,6 +89,10 @@ class Agent:
 
     def new_table(self, seat: int, num_seats: int) -> None:
         self.bot.new_table(seat, num_seats)
+
+    def hand_over(self, kit_result) -> None:
+        """PLACEHOLDER(kit): wire to the kit's end-of-hand hook, if it has one."""
+        self.bot.hand_over(to_hand_result(kit_result))
 
     def act(self, observation):
         return to_kit_action(self.bot.act(to_game_state(observation)), observation)
