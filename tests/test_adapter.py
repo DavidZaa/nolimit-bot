@@ -8,6 +8,7 @@ from adapter import build_bot, legal_actions, to_card
 from bot.state import RAISE, cards_from_str
 from engine.field import FolderBot
 from engine.rules import TableConfig
+from engine.run import BOTS
 from engine.sng import play_sng
 from engine.table import is_legal, play_hand
 
@@ -44,7 +45,11 @@ def test_built_bot_plays_legally_through_the_engine():
     assert sum(res.stats.decisions) > 0
 
 
-def test_built_bot_shoves_aces_unopened():
+def test_built_bot_is_the_one_the_runner_calls_ours():
+    assert type(build_bot().inner) is type(BOTS["ours"](0).inner)
+
+
+def test_built_bot_raises_aces_unopened():
     bot = build_bot()
     seen = []
 

@@ -7,24 +7,29 @@ Everything else is written against bot.state. On kit day:
   2. Rename/re-sign `Agent` below to match the template exactly.
   3. Fill in `to_game_state` and `to_kit_action` (the PLACEHOLDER(kit) spots).
   4. Run `pytest tests/test_adapter.py` plus a few hands in the kit's own
-     simulator, then submit. The baseline behind it is already tested.
+     simulator, then submit. The bot behind it is already tested.
 
-Anything the kit doesn't expose (antes, the action log, other seats' bets)
-can be left at a neutral value; the baseline only needs stacks, bets,
-blinds, positions and the legal actions.
+Anything the kit doesn't expose (antes, other seats' bets) can be left at a
+neutral value. The push/fold bot needs stacks, bets, blinds, positions, the
+board and the legal actions; the action log only sharpens two reads (who
+raised, for shove ranges and continuation bets) and can be left empty.
 """
 
 from __future__ import annotations
 
-from bot.baseline import BaselineBot
+from bot.pushfold import PushFoldBot
 from bot.runtime import tune_gc
 from bot.safety import SafeBot
 from bot.state import CALL, CHECK, FOLD, RAISE, Action, GameState, LegalActions, card_from_str
 
 
 def build_bot():
-    """The policy we play. Swap BaselineBot for the full policy once it's ready."""
-    return SafeBot(BaselineBot())
+    """The policy we play: push/fold until the tracker-driven policy beats it.
+
+    bot.baseline.BaselineBot is the simpler fallback if this ever misbehaves
+    against the real kit.
+    """
+    return SafeBot(PushFoldBot())
 
 
 def legal_actions(to_call: int, stack: int, min_raise_to: int, max_raise_to: int,

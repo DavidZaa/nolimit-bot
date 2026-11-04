@@ -19,6 +19,7 @@ from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass, field
 
 from bot.baseline import BaselineBot
+from bot.pushfold import PushFoldBot
 from bot.safety import SafeBot
 from engine.field import CallingStation, ChenTAG, EquityCaller, FolderBot, Maniac, PushFold, RandomBot
 from engine.latency import LatencyHistogram
@@ -26,6 +27,7 @@ from engine.rules import PLACEHOLDER_PAYOUTS, SCHEDULES, VARIANTS, TableConfig
 from engine.sng import play_sng
 
 BOTS = {
+    "ours": lambda seed: SafeBot(PushFoldBot()),  # what adapter.build_bot() submits
     "baseline": lambda seed: SafeBot(BaselineBot()),
     "baseline_raw": lambda seed: BaselineBot(),
     "random": lambda seed: RandomBot(seed),
