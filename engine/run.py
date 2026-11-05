@@ -24,7 +24,7 @@ from bot.pushfold import PushFoldBot
 from bot.safety import SafeBot
 from engine.field import CallingStation, ChenTAG, EquityCaller, FolderBot, Maniac, PushFold, RandomBot
 from engine.latency import LatencyHistogram
-from engine.rules import PLACEHOLDER_PAYOUTS, SCHEDULES, VARIANTS, TableConfig
+from engine.rules import NLHE, PLACEHOLDER_PAYOUTS, SCHEDULES, VARIANT_SPEC_HELP, TableConfig, parse_variant
 from engine.sng import play_sng
 from engine.table import CLOCK_NAME
 
@@ -191,7 +191,7 @@ def add_table_args(p: argparse.ArgumentParser) -> None:
     """Flags shared by every command that plays tables."""
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--lineup", default="baseline:4,random:2,station,maniac")
-    p.add_argument("--variant", choices=sorted(VARIANTS), default="nlhe")
+    p.add_argument("--variant", type=parse_variant, default=NLHE, help=VARIANT_SPEC_HELP)
     p.add_argument("--schedule", choices=sorted(SCHEDULES), default="doubling")
     p.add_argument("--payouts", default=",".join(str(x) for x in PLACEHOLDER_PAYOUTS),
                    help="points by finishing place, 1st first")
@@ -202,7 +202,7 @@ def add_table_args(p: argparse.ArgumentParser) -> None:
 
 def table_config(args: argparse.Namespace) -> TableConfig:
     return TableConfig(
-        variant=VARIANTS[args.variant],
+        variant=args.variant,
         schedule=SCHEDULES[args.schedule],
         payouts=tuple(float(x) for x in args.payouts.split(",")),
         max_hands=args.max_hands,

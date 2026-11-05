@@ -3,8 +3,8 @@
 Decisions only need to know roughly how strong the made hand is, so this
 buckets it (nothing / weak pair / top pair / two pair / trips or better)
 straight from rank and suit counts instead of scoring five-card combinations.
-Hold'em hands use the best five of all the cards; four-card hands are read
-as Omaha, exactly two from the hand.
+Hold'em hands use the best five of all the cards; hands of four or more
+cards are read as Omaha, exactly two from the hand.
 
 PLACEHOLDER(kit): GameState doesn't carry the variant, so the hole-card
 count decides Omaha, and A-2-3-4-5 is taken as the low straight.
@@ -77,7 +77,7 @@ def made_hand(hole, board) -> int:
     """Bucket a postflop hand. A pair that's only on the board counts as nothing."""
     if len(hole) + len(board) < 5:
         return NOTHING
-    level = _omaha_level(hole, board) if len(hole) == 4 else _level((*hole, *board))
+    level = _omaha_level(hole, board) if len(hole) >= 4 else _level((*hole, *board))
     if level == _STRONG:
         return MONSTER
     if level == _TWO_PAIR:

@@ -45,6 +45,54 @@ SHORT_DECK = Variant(
 PLO = Variant("plo", hole_cards=4, hole_cards_used=2, pot_limit=True)
 VARIANTS = {v.name: v for v in (NLHE, SHORT_DECK, PLO)}
 
+VARIANT_SPEC_HELP = (
+    "a preset (nlhe, short_deck, plo) or key=value pairs on top of one, e.g. "
+    "'base=nlhe,hole=3' or 'base=plo,hole=5' or 'ranks=6-A,flush_over_boat=1'. "
+    "Keys: base, hole, use (cards that must come from the hand; 'any' for hold'em), "
+    "ranks (low-high, e.g. 2-A), board (street sizes, e.g. 3+1+1), pot_limit (0/1), "
+    "flush_over_boat (0/1), trips_over_straight (0/1)"
+)
+
+
+def parse_variant(spec: str) -> Variant:
+    """A preset by name, or a preset adjusted by key=value pairs (see VARIANT_SPEC_HELP)."""
+    spec = spec.strip()
+    if spec in VARIANTS:
+        return VARIANTS[spec]
+    fields = {}
+    for part in spec.split(","):
+        key, sep, value = part.partition("=")
+        if not sep:
+            raise ValueError(f"unknown variant {spec!r}: {VARIANT_SPEC_HELP}")
+        fields[key.strip()] = value.strip()
+    base = VARIANTS[fields.pop("base", "nlhe")]
+    kw = {"name": spec}
+    if "hole" in fields:
+        kw["hole_cards"] = int(fields.pop("hole"))
+    if "use" in fields:
+        use = fields.pop("use")
+        kw["hole_cards_used"] = None if use in ("any", "0") else int(use)
+    if "ranks" in fields:
+        lo, _, hi = fields.pop("ranks").upper().partition("-")
+        chars = "23456789TJQKA"
+        kw["ranks"] = tuple(range(chars.index(lo), chars.index(hi) + 1))
+    if "board" in fields:
+        kw["board_schedule"] = tuple(int(x) for x in fields.pop("board").split("+"))
+    if "pot_limit" in fields:
+        kw["pot_limit"] = fields.pop("pot_limit") == "1"
+    order = list(base.category_order)
+    for key, (weaker, stronger) in (("flush_over_boat", (FULL_HOUSE, FLUSH)),
+                                    ("trips_over_straight", (STRAIGHT, TRIPS))):
+        if key in fields:
+            want = fields.pop(key) == "1"
+            i, j = order.index(weaker), order.index(stronger)
+            if want != (i < j):
+                order[i], order[j] = order[j], order[i]
+    kw["category_order"] = tuple(order)
+    if fields:
+        raise ValueError(f"unknown variant keys {sorted(fields)}: {VARIANT_SPEC_HELP}")
+    return Variant(**{**base.__dict__, **kw})
+
 
 @dataclass(frozen=True)
 class BlindSchedule:
@@ -77,3 +125,9 @@ class TableConfig:
     max_hands: int = 200
     time_limit_ns: int = 1_000_000  # the official 1 ms per decision
     enforce_time: bool = True  # treat slow decisions exactly like the tournament does
+
+    def __post_init__(self):
+        v = self.variant
+        needed = self.seats * v.hole_cards + sum(v.board_schedule)
+        if needed > len(v.deck()):
+            raise ValueError(f"{v.name}: {self.seats} seats need {needed} cards, the deck has {len(v.deck())}")
