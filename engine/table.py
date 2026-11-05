@@ -172,7 +172,7 @@ class _Hand:
         self.board: tuple[int, ...] = ()
 
         variant = config.variant
-        board_len = sum(variant.board_schedule)
+        board_len = variant.board_size
         if holes is None:
             deck = variant.deck()
             rng.shuffle(deck)
@@ -347,11 +347,13 @@ class _Hand:
 
     def play(self) -> HandOutcome:
         self._post_forced()
-        schedule = self.config.variant.board_schedule
-        dealt = 0
+        variant = self.config.variant
+        schedule = variant.board_schedule
+        dealt = variant.preflop_board
         for street in range(len(schedule) + 1):
             self.street = street
             if street == 0:
+                self.board = self.full_board[:dealt]  # empty unless cards come up early
                 first = (self.bb_seat + 1) % self.n
             else:
                 self.bets = [0] * self.n

@@ -1,5 +1,6 @@
 import pytest
 
+from bot.state import CALL, CHECK, Action
 from engine.rules import TableConfig
 from engine.run import main, parse_lineup, run_tables
 
@@ -62,3 +63,21 @@ def test_cli_plays_the_announced_structure(capsys):
           "--stack", "3000", "--payouts", "40,25,15,10,5,3,2,0"])
     out = capsys.readouterr().out
     assert "base=nlhe,hole=3" in out and "[40.0, 25.0, 15.0" in out
+
+
+def test_board_cards_can_come_up_before_preflop_betting():
+    from engine.rules import TableConfig, parse_variant
+    from engine.sng import play_sng
+
+    courchevel = parse_variant("base=plo,hole=5,up=1,board=2+1+1")
+    assert courchevel.board_size == 5 and courchevel.hole_cards_used == 2
+
+    seen = {}
+
+    class Looks:
+        def act(self, state):
+            seen.setdefault(state.street, len(state.board))
+            return Action(CALL) if state.legal.can_call else Action(CHECK)
+
+    play_sng([Looks() for _ in range(8)], TableConfig(variant=courchevel, max_hands=5), seed=1)
+    assert seen[0] == 1 and seen[1] == 3 and seen[2] == 4 and seen[3] == 5

@@ -90,12 +90,12 @@ def format_hand(number: int, before, out: HandOutcome, names, config: TableConfi
 
     actions = _actions_by_street(before, out)
     dealt = 0
-    for street, size in enumerate((0, *config.variant.board_schedule)):
+    for street, size in enumerate((config.variant.preflop_board, *config.variant.board_schedule)):
         dealt += size
         if dealt > len(out.board):
             break
         label = STREET_NAMES[street] if street < len(STREET_NAMES) else f"street {street}"
-        board = f"[{_cards(out.board[:dealt])}]" if street else ""
+        board = f"[{_cards(out.board[:dealt])}]" if dealt else ""
         lines.append(f"  {label:<8}{board:<17}{', '.join(actions.get(street, ['—']))}".rstrip())
 
     variant = config.variant

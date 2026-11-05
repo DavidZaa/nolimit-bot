@@ -29,6 +29,11 @@ class Variant:
     category_order: tuple[int, ...] = STANDARD_ORDER  # weakest first
     hole_cards_used: int | None = None  # None: best five of all cards; 2: Omaha
     pot_limit: bool = False
+    preflop_board: int = 0  # board cards dealt face up before preflop betting (Courchevel: 1)
+
+    @property
+    def board_size(self) -> int:
+        return self.preflop_board + sum(self.board_schedule)
 
     def deck(self) -> list[int]:
         return [r * 4 + s for r in self.ranks for s in range(4)]
@@ -49,7 +54,8 @@ VARIANT_SPEC_HELP = (
     "a preset (nlhe, short_deck, plo) or key=value pairs on top of one, e.g. "
     "'base=nlhe,hole=3' or 'base=plo,hole=5' or 'ranks=6-A,flush_over_boat=1'. "
     "Keys: base, hole, use (cards that must come from the hand; 'any' for hold'em), "
-    "ranks (low-high, e.g. 2-A), board (street sizes, e.g. 3+1+1), pot_limit (0/1), "
+    "ranks (low-high, e.g. 2-A), board (street sizes, e.g. 3+1+1), up (board cards face up "
+    "before preflop betting, e.g. Courchevel is base=plo,hole=5,up=1,board=2+1+1), pot_limit (0/1), "
     "flush_over_boat (0/1), trips_over_straight (0/1)"
 )
 
@@ -78,6 +84,8 @@ def parse_variant(spec: str) -> Variant:
         kw["ranks"] = tuple(range(chars.index(lo), chars.index(hi) + 1))
     if "board" in fields:
         kw["board_schedule"] = tuple(int(x) for x in fields.pop("board").split("+"))
+    if "up" in fields:
+        kw["preflop_board"] = int(fields.pop("up"))
     if "pot_limit" in fields:
         kw["pot_limit"] = fields.pop("pot_limit") == "1"
     order = list(base.category_order)
@@ -161,6 +169,6 @@ class TableConfig:
 
     def __post_init__(self):
         v = self.variant
-        needed = self.seats * v.hole_cards + sum(v.board_schedule)
+        needed = self.seats * v.hole_cards + v.board_size
         if needed > len(v.deck()):
             raise ValueError(f"{v.name}: {self.seats} seats need {needed} cards, the deck has {len(v.deck())}")
