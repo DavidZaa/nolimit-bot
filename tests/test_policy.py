@@ -15,6 +15,13 @@ from engine.table import play_hand
 from helpers import Scripted, decisions, facing_shove
 
 
+@pytest.fixture(autouse=True)
+def chen_ranking(monkeypatch):
+    """These tests pin exact decisions with specific hands, so they rank hands with
+    Chen whatever table is installed for the event (kickoff runs this suite)."""
+    monkeypatch.setattr("bot.policy.ACTIVE", CHEN)
+
+
 def primed(seat, opponents, hands=30, features=FEATURES):
     """A PolicyBot that has watched `hands` hands from `seat` against `opponents` (seat -> bot)."""
     bot = PolicyBot(features)

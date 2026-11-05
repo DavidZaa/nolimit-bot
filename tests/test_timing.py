@@ -7,10 +7,11 @@ it in a tight loop, outside the engine, so only the bot's own time is
 measured. This is wall-clock time on a quiet process; the engine's own
 timing is CPU time.
 
-Machine noise (other processes, CPU frequency) can push a single sample's
-wall-clock max into milliseconds on a desktop, so the wall-clock assertions
-are on p99.9. The at-scale tests also hold every decision's CPU time, which
-noise can't inflate, under the 1 ms limit.
+A busy desktop pauses processes for milliseconds at a time, which shows up
+in wall-clock times and has nothing to do with the bot. So the assertions
+use each decision's thread CPU time, which that noise can't inflate: p99.9
+within the 200 µs budget everywhere, and at scale no decision ever costing
+the 1 ms limit. Wall-clock numbers are printed alongside for reference.
 """
 
 import os
@@ -85,6 +86,10 @@ def time_decisions(bot, states, repeats=1, cpu=None):
     return hist
 
 
+def _cpu_p999_us(cpu) -> float:
+    return sorted(cpu)[int(len(cpu) * 0.999)] / 1000
+
+
 def _report(label, hist):
     print(
         f"\n{label}: n={hist.count} p50={hist.percentile_us(0.5)}us "
@@ -96,10 +101,11 @@ def _report(label, hist):
 @pytest.mark.parametrize("name", BOTS)
 def test_safe_bot_latency(name, variant):
     states = collect_states(40, variant, BOTS[name])
-    hist = time_decisions(SafeBot(BOTS[name]()), states, repeats=3)
+    cpu = []
+    hist = time_decisions(SafeBot(BOTS[name]()), states, repeats=3, cpu=cpu)
     _report(f"safe {name} [{variant.name}]", hist)
     assert hist.count > 2000
-    assert hist.percentile_us(0.999) <= BUDGET_P999_US
+    assert _cpu_p999_us(cpu) <= BUDGET_P999_US
 
 
 @pytest.mark.slow
@@ -115,7 +121,7 @@ def test_safe_bot_latency_at_scale(name, gc_mode):
     _report(f"safe {name} at scale [gc {gc_mode}]", hist)
     print(f"  worst CPU time {max(cpu) // 1000}us")
     assert hist.count > 500_000
-    assert hist.percentile_us(0.999) <= BUDGET_P999_US
+    assert _cpu_p999_us(cpu) <= BUDGET_P999_US
     # The wall-clock max includes the OS pausing us on a busy machine; CPU time
     # is what the bot's own code costs, and no decision may ever cost the limit.
     assert max(cpu) < 1_000_000
