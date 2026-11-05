@@ -46,7 +46,7 @@ def test_built_bot_plays_legally_through_the_engine():
 
 
 def test_built_bot_is_the_one_the_runner_calls_ours():
-    assert type(build_bot().inner) is type(BOTS["ours"](0).inner)
+    assert type(build_bot().inner) is type(BOTS["ours"](0, TableConfig()).inner)
 
 
 def test_built_bot_raises_aces_unopened():

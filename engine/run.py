@@ -19,7 +19,7 @@ from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass, field
 
 from bot.baseline import BaselineBot
-from bot.policy import FEATURES, PolicyBot
+from bot.policy import DEFAULT_FEATURES, FEATURES, V4_FEATURES, PolicyBot
 from bot.pushfold import PushFoldBot
 from bot.safety import SafeBot
 from engine.field import CallingStation, ChenTAG, EquityCaller, FolderBot, Maniac, PushFold, RandomBot
@@ -28,23 +28,31 @@ from engine.rules import PLACEHOLDER_PAYOUTS, SCHEDULES, VARIANTS, TableConfig
 from engine.sng import play_sng
 from engine.table import CLOCK_NAME
 
+def _policy(features=DEFAULT_FEATURES):
+    # Our bot plays by the table's points, as it will once the real ones are set at kickoff.
+    return lambda seed, config: SafeBot(PolicyBot(features, payouts=config.payouts))
+
+
+# Every factory takes (seed, table config) and returns a fresh bot.
 BOTS = {
-    "ours": lambda seed: SafeBot(PolicyBot()),  # what adapter.build_bot() submits
-    "v3": lambda seed: SafeBot(PushFoldBot()),  # the previous submission, for comparisons
-    "baseline": lambda seed: SafeBot(BaselineBot()),
-    "baseline_raw": lambda seed: BaselineBot(),
-    "random": lambda seed: RandomBot(seed),
-    "station": lambda seed: CallingStation(),
-    "maniac": lambda seed: Maniac(),
-    "folder": lambda seed: FolderBot(),
-    "tag": lambda seed: ChenTAG(),
-    "equity": lambda seed: EquityCaller(),
-    "pushfold": lambda seed: PushFold(),
-    "policy": lambda seed: SafeBot(PolicyBot()),
+    "ours": _policy(),  # what adapter.build_bot() submits
+    "v4": _policy(V4_FEATURES),
+    "v3": lambda seed, config: SafeBot(PushFoldBot()),
+    "baseline": lambda seed, config: SafeBot(BaselineBot()),
+    "baseline_raw": lambda seed, config: BaselineBot(),
+    "random": lambda seed, config: RandomBot(seed),
+    "station": lambda seed, config: CallingStation(),
+    "maniac": lambda seed, config: Maniac(),
+    "folder": lambda seed, config: FolderBot(),
+    "tag": lambda seed, config: ChenTAG(),
+    "equity": lambda seed, config: EquityCaller(),
+    "pushfold": lambda seed, config: PushFold(),
+    "policy": _policy(FEATURES),  # every feature, built or not yet submitted
 }
-# One feature at a time, for measuring each adjustment on its own.
+# Measuring features: policy_<f> has only that one, policy_no_<f> has all but it.
 for _feature in FEATURES:
-    BOTS[f"policy_{_feature}"] = lambda seed, f=_feature: SafeBot(PolicyBot(features=(f,)))
+    BOTS[f"policy_{_feature}"] = _policy((_feature,))
+    BOTS[f"policy_no_{_feature}"] = _policy(tuple(x for x in FEATURES if x != _feature))
 
 
 def parse_lineup(spec: str) -> list[str]:
@@ -102,20 +110,20 @@ def seat_names(lineup, seed: int, table: int) -> tuple[int, list[str]]:
     return table_seed, names
 
 
-def seat_table(lineup, seed: int, table: int) -> tuple[int, list[str], list]:
+def seat_table(lineup, seed: int, table: int, config: TableConfig) -> tuple[int, list[str], list]:
     """(table seed, bot name per seat, fresh bots) for table number `table` of a run.
 
     The hand viewer and the paired comparison seat tables through this too,
     so any table from a run can be replayed card for card.
     """
     table_seed, names = seat_names(lineup, seed, table)
-    return table_seed, names, [BOTS[name](table_seed * 16 + s) for s, name in enumerate(names)]
+    return table_seed, names, [BOTS[name](table_seed * 16 + s, config) for s, name in enumerate(names)]
 
 
 def _run_chunk(lineup, start: int, count: int, seed: int, config: TableConfig) -> dict[str, BotSummary]:
     out = {name: BotSummary() for name in lineup}
     for t in range(start, start + count):
-        table_seed, names, bots = seat_table(lineup, seed, t)
+        table_seed, names, bots = seat_table(lineup, seed, t, config)
         res = play_sng(bots, config, seed=table_seed)
         st = res.stats
         for s, name in enumerate(names):

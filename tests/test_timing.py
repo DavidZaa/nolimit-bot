@@ -16,7 +16,7 @@ import os
 import pytest
 
 from bot.baseline import BaselineBot
-from bot.policy import PolicyBot
+from bot.policy import FEATURES, PolicyBot
 from bot.pushfold import PushFoldBot
 from bot.runtime import tune_gc
 from bot.safety import SafeBot
@@ -27,7 +27,13 @@ from engine.sng import play_sng
 from time import perf_counter_ns
 
 BUDGET_P999_US = 200  # target from the design: far under the 1 ms limit
-BOTS = {"baseline": BaselineBot, "pushfold": PushFoldBot, "policy": PolicyBot}
+FLAT = (30, 20, 15, 12, 9, 7, 5, 2)  # the slowest points for ICM: every place pays differently
+BOTS = {
+    "baseline": BaselineBot,
+    "pushfold": PushFoldBot,
+    "policy": PolicyBot,
+    "policy_all_flat": lambda: PolicyBot(FEATURES, payouts=FLAT),
+}
 
 
 class Recorder:

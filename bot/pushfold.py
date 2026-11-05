@@ -82,7 +82,7 @@ class PushFoldBot:
             behind = self._behind(state, seat)
             widen = self._steal_widening(state, behind)
             if depth <= SHOVE_DEPTH_BB:
-                if pct <= shove_range(depth, len(behind)) * widen:
+                if pct <= shove_range(depth, len(behind)) * widen / self._shove_tightness(state, behind):
                     return _raise_to(legal, legal.max_raise_to)
                 return _check_or(legal, call=False)
             if pct <= 0.45 / max(len(behind), 1) ** 0.8 * widen:
@@ -94,7 +94,7 @@ class PushFoldBot:
             raiser = _last_raiser(state, 0)
             theirs = self._raiser_range(state, raiser, bb)
             waiting = self._still_to_act(state, seat, raiser)
-            if pct <= theirs * 0.7 / (1 + 0.5 * waiting):
+            if pct <= theirs * 0.7 / (1 + 0.5 * waiting) / self._call_tightness(state, raiser):
                 return _raise_to(legal, legal.max_raise_to)
             return _check_or(legal, call=False)
 
@@ -130,6 +130,14 @@ class PushFoldBot:
             return 0.10
         their_depth = (state.stacks[raiser] + state.bets[raiser]) / bb
         return shove_range(their_depth, len(self._behind(state, raiser)))
+
+    def _shove_tightness(self, state, behind: list[int]) -> float:
+        """Divisor on the first-in shove range for what getting called would cost."""
+        return 1.0
+
+    def _call_tightness(self, state, raiser) -> float:
+        """Divisor on the range we get all-in with against a raise."""
+        return 1.0
 
     def _still_to_act(self, state, seat: int, raiser) -> int:
         """Others still in with chips who could overcall behind us."""

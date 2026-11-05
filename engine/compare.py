@@ -87,7 +87,8 @@ def _run_chunk(candidate, reference, lineup, start, count, seed, config) -> Comp
         heroes = [s for s, name in enumerate(names) if name == HERO]
         points = []
         for arm, who in enumerate((candidate, reference)):
-            bots = [BOTS[who if name == HERO else name](table_seed * 16 + s) for s, name in enumerate(names)]
+            bots = [BOTS[who if name == HERO else name](table_seed * 16 + s, config)
+                    for s, name in enumerate(names)]
             res = play_sng(bots, config, seed=table_seed)
             points.append(sum(res.points[s] for s in heroes) / len(heroes))
             if arm == 0:

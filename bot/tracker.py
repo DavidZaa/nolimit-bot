@@ -40,7 +40,7 @@ def _estimate(observed: int, chances: int, prior: float) -> float:
     return (observed + prior * PRIOR_WEIGHT) / (chances + PRIOR_WEIGHT)
 
 
-def _start_stacks(state) -> list[int]:
+def start_stacks(state) -> list[int]:
     """Stacks at the start of the hand: chips behind now plus everything put in so far."""
     put_in = [0] * len(state.stacks)
     street_bet: dict[tuple[int, int], int] = {}
@@ -78,7 +78,7 @@ class Tracker:
             self._hand = state.hand_number
             # Exact from the hand itself; the last result's stacks only cover
             # hands we never got to see.
-            self._start = _start_stacks(state)
+            self._start = start_stacks(state)
             self._next_start = None
         self._seen = state.actions
 

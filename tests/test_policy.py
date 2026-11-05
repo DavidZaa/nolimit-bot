@@ -69,6 +69,37 @@ def test_against_a_station_it_stops_bluffing_and_bets_value_bigger():
     assert plain[1][1] == Action(RAISE, 55)  # push/fold c-bets the station anyway
 
 
+BUBBLE = [400, 150, 200, 150, 0, 0, 0, 0]  # four left, three paid; we're the BB on 200
+TOP3 = (50, 30, 20, 0, 0, 0, 0, 0)
+WTA = (100, 0, 0, 0, 0, 0, 0, 0)
+
+
+def test_on_the_bubble_icm_folds_a_hand_chip_ev_would_call_off_with():
+    with_icm = PolicyBot(FEATURES, payouts=TOP3)
+    chips_only = PolicyBot(tuple(f for f in FEATURES if f != "icm"), payouts=TOP3)
+    assert facing_shove(chips_only, 2, "KcQh", shover=0, stacks=BUBBLE) == Action(CALL)
+    assert facing_shove(with_icm, 2, "KcQh", shover=0, stacks=BUBBLE) == Action(FOLD)
+    assert facing_shove(with_icm, 2, "AcQd", shover=0, stacks=BUBBLE) == Action(CALL)
+
+
+def test_winner_take_all_leaves_the_icm_feature_with_nothing_to_do():
+    assert facing_shove(PolicyBot(FEATURES, payouts=WTA), 2, "KcQh", shover=0, stacks=BUBBLE) == Action(CALL)
+
+
+@pytest.mark.parametrize("variant", [NLHE, PLO], ids=lambda v: v.name)
+def test_with_winner_take_all_points_icm_changes_no_decision(variant):
+    states = []
+    config = TableConfig(variant=variant, enforce_time=False, payouts=WTA)
+    for t in range(10):
+        bots = [Recorder(PolicyBot(FEATURES, payouts=WTA), states) for _ in range(3)] + [
+            ChenTAG(), EquityCaller(), CallingStation(), Maniac(), RandomBot(t)]
+        play_sng(bots, config, seed=t)
+    without = tuple(f for f in FEATURES if f != "icm")
+    for st in states:
+        # Fresh bots each time: trackers start from the priors in both.
+        assert PolicyBot(FEATURES, payouts=WTA).act(st) == PolicyBot(without, payouts=WTA).act(st)
+
+
 def test_features_are_validated():
     with pytest.raises(ValueError):
         PolicyBot(features=("telepathy",))
@@ -77,6 +108,12 @@ def test_features_are_validated():
 class Recorder:
     def __init__(self, inner, sink):
         self.inner, self.sink = inner, sink
+
+    def new_table(self, seat, num_seats):
+        getattr(self.inner, "new_table", lambda *a: None)(seat, num_seats)
+
+    def hand_over(self, result):
+        getattr(self.inner, "hand_over", lambda r: None)(result)
 
     def act(self, state):
         self.sink.append(state)

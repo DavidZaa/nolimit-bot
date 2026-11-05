@@ -11,6 +11,8 @@ Every adjustment is a named feature so each can be measured on its own
           continuation-betting air at them
   broken  leave seats that never put in a voluntary chip out of every count
           of players who could wake up with a hand
+  icm     tighten all-in calls and first-in shoves by the bubble factor
+          against the player who could bust us, from the real payouts
 
 With no features it plays exactly like PushFoldBot.
 """
@@ -18,25 +20,35 @@ With no features it plays exactly like PushFoldBot.
 from __future__ import annotations
 
 from bot.hands import TOP_PAIR, WEAK_PAIR
+from bot.icm import PAYOUTS, bubble_factor
 from bot.pushfold import PushFoldBot, _last_raiser, seats_behind
-from bot.tracker import PRIORS, Tracker
+from bot.tracker import PRIORS, Tracker, start_stacks
 
-FEATURES = ("shoves", "steals", "cbets", "broken")
+FEATURES = ("shoves", "steals", "cbets", "broken", "icm")
+V4_FEATURES = ("shoves", "steals", "cbets", "broken")
+DEFAULT_FEATURES = V4_FEATURES  # what PolicyBot() and the submission play
 
 STEAL_ANY_TWO = 0.9  # P(everyone behind folds) at which any two cards steal
 ANY_TWO = float("inf")  # a range multiplier every hand clears
 MAX_WIDEN, MIN_WIDEN = 3.0, 0.5
 STICKY = 0.25  # fold-to-bet below this: value-bet thin and big, never bluff
 CBET_FOLDS = 0.35  # fold-to-bet needed before continuation-betting air
+ICM_CALL_POWER = 1.0  # calling range shrinks by bubble_factor ** this
+ICM_SHOVE_POWER = 1.0  # first-in shove range likewise
 
 
 class PolicyBot(PushFoldBot):
-    def __init__(self, features=FEATURES):
+    def __init__(self, features=DEFAULT_FEATURES, payouts=PAYOUTS,
+                 icm_powers=(ICM_CALL_POWER, ICM_SHOVE_POWER)):
         unknown = set(features) - set(FEATURES)
         if unknown:
             raise ValueError(f"unknown features {sorted(unknown)}; known: {FEATURES}")
         self.features = frozenset(features)
+        self.payouts = tuple(payouts)
+        self.call_power, self.shove_power = icm_powers
         self.tracker = Tracker()
+        self._bubble_hand = None
+        self._bubbles: dict[int, float] = {}
 
     def new_table(self, seat: int, num_seats: int) -> None:
         self.tracker.new_table(seat, num_seats)
@@ -75,6 +87,29 @@ class PolicyBot(PushFoldBot):
         if "shoves" in self.features and raiser is not None:
             return max(model, self.tracker.shove_rate(raiser))
         return model
+
+    def _bubble(self, state, opp: int) -> float:
+        """Bubble factor for an all-in against `opp`. Everyone's chips are fixed for
+        the length of a hand, so it's worked out once per opponent per hand."""
+        if state.hand_number != self._bubble_hand:
+            self._bubble_hand, self._bubbles = state.hand_number, {}
+        bf = self._bubbles.get(opp)
+        if bf is None:
+            bf = self._bubbles[opp] = bubble_factor(start_stacks(state), state.seat, opp, self.payouts)
+        return bf
+
+    def _call_tightness(self, state, raiser):
+        if "icm" not in self.features or raiser is None:
+            return 1.0
+        return self._bubble(state, raiser) ** self.call_power
+
+    def _shove_tightness(self, state, behind):
+        if "icm" not in self.features or not behind:
+            return 1.0
+        # The deepest stack behind is the one whose call can bust us.
+        totals = start_stacks(state)
+        caller = max(behind, key=lambda s: totals[s])
+        return self._bubble(state, caller) ** self.shove_power
 
     def _still_to_act(self, state, seat, raiser):
         if "broken" not in self.features:

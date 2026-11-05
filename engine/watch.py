@@ -133,7 +133,7 @@ def watch_table(lineup, seed: int, table: int, config: TableConfig, hero: str = 
                 involved: bool = False, limit: int | None = None,
                 write=print) -> tuple[list[str], SngResult]:
     """Play table `table` of run `seed`, writing each hand as it finishes, then the standings."""
-    table_seed, names, bots = seat_table(lineup, seed, table)
+    table_seed, names, bots = seat_table(lineup, seed, table, config)
     heroes = [s for s, name in enumerate(names) if name == hero]
     printed = 0
 
