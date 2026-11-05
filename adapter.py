@@ -33,9 +33,11 @@ from bot.state import (
 
 
 def build_bot():
-    """The policy we play: push/fold adjusted per seat by the opponent tracker.
+    """The policy we play (v5): push/fold adjusted per seat by the opponent
+    tracker, with all-ins weighed by ICM on the announced points.
 
     Fallbacks if it misbehaves against the real kit, in order:
+    PolicyBot(V4_FEATURES) (no ICM, so no dependence on PAYOUTS),
     bot.pushfold.PushFoldBot (same strategy, no tracker), then
     bot.baseline.BaselineBot.
     """

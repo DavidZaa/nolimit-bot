@@ -4,7 +4,7 @@ import random
 
 import pytest
 
-from bot.policy import FEATURES, PolicyBot
+from bot.policy import FEATURES, V4_FEATURES, V5_FEATURES, PolicyBot
 from bot.pushfold import PushFoldBot
 from bot.state import CALL, CHECK, FOLD, RAISE, Action, fallback_action
 from engine.field import CallingStation, ChenTAG, EquityCaller, FolderBot, Maniac, RandomBot
@@ -98,6 +98,51 @@ def test_with_winner_take_all_points_icm_changes_no_decision(variant):
     for st in states:
         # Fresh bots each time: trackers start from the priors in both.
         assert PolicyBot(FEATURES, payouts=WTA).act(st) == PolicyBot(without, payouts=WTA).act(st)
+
+
+class Twin:
+    """Plays `primary`, feeds `shadow` the exact same calls, and records any decision they split on."""
+
+    def __init__(self, primary, shadow, splits):
+        self.primary, self.shadow, self.splits = primary, shadow, splits
+        self.decisions = 0
+
+    def new_table(self, seat, num_seats):
+        self.primary.new_table(seat, num_seats)
+        self.shadow.new_table(seat, num_seats)
+
+    def hand_over(self, result):
+        self.primary.hand_over(result)
+        self.shadow.hand_over(result)
+
+    def act(self, state):
+        action, other = self.primary.act(state), self.shadow.act(state)
+        self.decisions += 1
+        if action != other:
+            self.splits.append((state, action, other))
+        return action
+
+
+@pytest.mark.parametrize("variant, reference", [
+    (NLHE, V5_FEATURES), (SHORT_DECK, V5_FEATURES), (PLO, V4_FEATURES),
+], ids=["nlhe plays v5", "short deck plays v5", "plo plays v4"])
+def test_the_submitted_bot_plays_v5_but_v4_with_omaha_hands(variant, reference):
+    splits, twins = [], []
+    config = TableConfig(variant=variant, enforce_time=False)
+    for t in range(10):
+        pair = [Twin(PolicyBot(), PolicyBot(reference), splits) for _ in range(3)]
+        twins += pair
+        bots = pair + [ChenTAG(), EquityCaller(), Maniac(), FolderBot(), RandomBot(t)]
+        random.Random(t).shuffle(bots)
+        play_sng(bots, config, seed=t)
+    assert sum(t.decisions for t in twins) > 1000
+    assert not splits
+
+
+def test_explicit_features_apply_to_omaha_hands_too():
+    bot = PolicyBot(("steals",))
+    assert bot.omaha_features == bot.features == {"steals"}
+    assert PolicyBot(("steals",), omaha_features=()).omaha_features == frozenset()
 
 
 def test_features_are_validated():

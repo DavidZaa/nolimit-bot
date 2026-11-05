@@ -1,7 +1,7 @@
 import pytest
 
 from engine.compare import _hero_lineup, compare, main
-from engine.rules import TableConfig
+from engine.rules import PLO, TableConfig
 
 LINEUP = _hero_lineup("hero,pushfold:2,tag:2,equity,folder,maniac")
 CONFIG = TableConfig(enforce_time=False)
@@ -30,10 +30,16 @@ def test_pairing_finds_a_real_edge_quickly():
 
 
 @pytest.mark.slow
-def test_the_submitted_bot_still_beats_the_previous_one():
-    # The policy replaced push/fold (v3) on a +3.7 ± 0.8 edge over 4,000 tables.
-    c = compare("ours", "v3", LINEUP, tables=2000, config=CONFIG, workers=4)
+@pytest.mark.parametrize("previous", ["v3", "v4"])
+def test_the_submitted_bot_still_beats_the_previous_ones(previous):
+    # v4 beat push/fold (v3) by +3.7 ± 0.8; v5 beat v4 by +1.9 ± 0.7 on a fresh seed.
+    c = compare("ours", previous, LINEUP, tables=3000, seed=2026, config=CONFIG, workers=8)
     assert c.mean_diff - c.ci95 > 0, (c.mean_diff, c.ci95)
+
+
+def test_with_omaha_hands_the_submitted_bot_is_exactly_v4():
+    c = compare("ours", "v4", LINEUP, tables=40, config=TableConfig(variant=PLO, enforce_time=False))
+    assert c.diff_sum == 0 and c.diff_sq == 0
 
 
 def test_parallel_matches_serial():
