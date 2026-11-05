@@ -15,7 +15,7 @@ payouts differ: everything is measured relative to the last open place, so
 from __future__ import annotations
 
 # Points by finishing place, 1st first. PLACEHOLDER(kit): set from the announced points.
-PAYOUTS = (50.0, 30.0, 20.0, 0.0, 0.0, 0.0, 0.0, 0.0)
+PAYOUTS = (21.0, 13.0, 8.0, 5.0, 3.0, 2.0, 1.0, 1.0)
 # Below 1 is real (a big stack calling a short one on the bubble gains from
 # busting it), but never so far that a range divided by it blows up.
 MIN_BUBBLE_FACTOR, MAX_BUBBLE_FACTOR = 0.25, 4.0
