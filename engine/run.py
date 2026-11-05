@@ -24,7 +24,7 @@ from bot.preflop import CHEN
 from bot.pushfold import PushFoldBot
 from bot.safety import SafeBot
 from engine.field import CallingStation, ChenTAG, EquityCaller, FolderBot, Maniac, PushFold, RandomBot
-from engine.field_llm import llm1_strong, llm2_tag, llm3_montecarlo
+from engine.field_llm import llm1_strong, llm2_tag, llm3_montecarlo, llm4_pushfold
 from engine.latency import LatencyHistogram
 from engine.rules import (
     NLHE, PLACEHOLDER_PAYOUTS, SCHEDULE_SPEC_HELP, VARIANT_SPEC_HELP, TableConfig, parse_schedule,
@@ -60,6 +60,7 @@ BOTS = {
     "llm1": lambda seed, config: llm1_strong.Bot(),
     "llm2": lambda seed, config: llm2_tag.Bot(),
     "llm3": lambda seed, config: llm3_montecarlo.Bot(),
+    "llm4": lambda seed, config: llm4_pushfold.Bot(),
     "policy": _policy(FEATURES),  # every feature, built or not yet submitted
 }
 # Measuring features: policy_<f> has only that one, policy_no_<f> has all but it.
