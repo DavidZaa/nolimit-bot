@@ -6,9 +6,13 @@ VARIANT DAY (kickoff), in order:
   2. Rank the hands:    python -m gen.hand_ranks --variant <preset or spec>
                         (presets: nlhe, short_deck, plo; anything else as a spec,
                         e.g. "base=nlhe,hole=3" or "base=plo,hole=5", see --help).
-                        Cached tables for the presets are in gen/tables/, so
-                        `cp gen/tables/plo.py bot/hand_ranks_table.py` is instant.
-                        Plain hold'em: skip this step, the bot already uses Chen.
+                        It writes bot/hand_ranks_table.py in about 4 minutes.
+                        Short deck and PLO are cached in gen/tables/, so
+                        `cp gen/tables/short_deck.py bot/hand_ranks_table.py` is instant.
+                        Plain hold'em: keep the committed table (PLO's, four cards,
+                        so hold'em hands still use Chen: measured no better or worse).
+                        A two-card table left over from a mock would replace Chen.
+                        `git checkout bot/hand_ranks_table.py` restores the default.
   3. Check it:          .venv/bin/pytest -q
   4. See it play:       python -m engine.run --variant <same> --tables 300 --workers 8 \
                             --lineup ours:2,pushfold:2,tag:2,equity,maniac
@@ -107,7 +111,7 @@ def rank_hands(variant, seconds: float = 240, workers: int | None = None, seed: 
         for hole, (_, _, board) in zip(sample, probe):
             best_hand(hole, board, variant)
         per_eval = (time.perf_counter() - t0) / len(sample)
-        budget = max(1.0, seconds - (time.perf_counter() - started)) * workers * 0.8
+        budget = max(1.0, seconds - (time.perf_counter() - started)) * workers * 0.6
         trials = int(min(MAX_TRIALS, max(MIN_TRIALS, budget / (len(classes) * per_eval))))
     pool = int(trials / _clean_share(variant) * 1.25) + 50
     log(f"{trials:,} trials per class against a shared pool of {pool:,} opponents and boards, "

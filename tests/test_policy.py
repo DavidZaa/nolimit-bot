@@ -5,6 +5,7 @@ import random
 import pytest
 
 from bot.policy import FEATURES, V4_FEATURES, V5_FEATURES, PolicyBot
+from bot.preflop import CHEN
 from bot.pushfold import PushFoldBot
 from bot.state import CALL, CHECK, FOLD, RAISE, Action, fallback_action
 from engine.field import CallingStation, ChenTAG, EquityCaller, FolderBot, Maniac, RandomBot
@@ -166,14 +167,14 @@ class Recorder:
 
 
 @pytest.mark.parametrize("variant", [NLHE, PLO], ids=lambda v: v.name)
-def test_without_features_it_is_exactly_push_fold(variant):
+def test_without_features_and_on_the_same_ranking_it_is_exactly_push_fold(variant):
     states = []
     config = TableConfig(variant=variant, enforce_time=False)
     for t in range(10):
         bots = [Recorder(PushFoldBot(), states) for _ in range(3)] + [
             ChenTAG(), EquityCaller(), CallingStation(), Maniac(), RandomBot(t)]
         play_sng(bots, config, seed=t)
-    plain, featureless = PushFoldBot(), PolicyBot(features=())
+    plain, featureless = PushFoldBot(), PolicyBot(features=(), ranks=CHEN)
     for st in states:
         assert featureless.act(st) == plain.act(st)
 
