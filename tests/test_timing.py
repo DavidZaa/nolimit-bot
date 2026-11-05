@@ -8,7 +8,9 @@ measured. This is wall-clock time on a quiet process; the engine's own
 timing is CPU time.
 
 Machine noise (other processes, CPU frequency) can push a single sample's
-max around, so the hard assertions are on p99.9; the max is printed.
+wall-clock max into milliseconds on a desktop, so the wall-clock assertions
+are on p99.9. The at-scale tests also hold every decision's CPU time, which
+noise can't inflate, under the 1 ms limit.
 """
 
 import os
@@ -24,7 +26,7 @@ from engine.field import CallingStation, ChenTAG, Maniac, RandomBot
 from engine.latency import LatencyHistogram
 from engine.rules import NLHE, PLO, TableConfig
 from engine.sng import play_sng
-from time import perf_counter_ns
+from time import perf_counter_ns, thread_time_ns
 
 BUDGET_P999_US = 200  # target from the design: far under the 1 ms limit
 FLAT = (30, 20, 15, 12, 9, 7, 5, 2)  # the slowest points for ICM: every place pays differently
@@ -69,13 +71,16 @@ def collect_states(tables, variant, make_bot):
     return states
 
 
-def time_decisions(bot, states, repeats=1):
+def time_decisions(bot, states, repeats=1, cpu=None):
+    """Wall-clock histogram of every decision; `cpu`, if given, collects thread CPU times."""
     hist = LatencyHistogram()
     act = bot.act
     for _ in range(repeats):
         for st in states:
-            t0 = perf_counter_ns()
+            t0, c0 = perf_counter_ns(), thread_time_ns()
             act(st)
+            if cpu is not None:
+                cpu.append(thread_time_ns() - c0)
             hist.add(perf_counter_ns() - t0)
     return hist
 
@@ -105,7 +110,12 @@ def test_safe_bot_latency_at_scale(name, gc_mode):
     states += collect_states(100, PLO, BOTS[name])
     if gc_mode == "frozen":
         tune_gc()
-    hist = time_decisions(SafeBot(BOTS[name]()), states, repeats=5)
+    cpu = []
+    hist = time_decisions(SafeBot(BOTS[name]()), states, repeats=5, cpu=cpu)
     _report(f"safe {name} at scale [gc {gc_mode}]", hist)
+    print(f"  worst CPU time {max(cpu) // 1000}us")
     assert hist.count > 500_000
     assert hist.percentile_us(0.999) <= BUDGET_P999_US
+    # The wall-clock max includes the OS pausing us on a busy machine; CPU time
+    # is what the bot's own code costs, and no decision may ever cost the limit.
+    assert max(cpu) < 1_000_000
