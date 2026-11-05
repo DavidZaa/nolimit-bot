@@ -26,7 +26,10 @@ from bot.safety import SafeBot
 from engine.field import CallingStation, ChenTAG, EquityCaller, FolderBot, Maniac, PushFold, RandomBot
 from engine.field_llm import llm1_strong, llm2_tag, llm3_montecarlo
 from engine.latency import LatencyHistogram
-from engine.rules import NLHE, PLACEHOLDER_PAYOUTS, SCHEDULES, VARIANT_SPEC_HELP, TableConfig, parse_variant
+from engine.rules import (
+    NLHE, PLACEHOLDER_PAYOUTS, SCHEDULE_SPEC_HELP, VARIANT_SPEC_HELP, TableConfig, parse_schedule,
+    parse_variant,
+)
 from engine.sng import play_sng
 from engine.table import CLOCK_NAME
 
@@ -199,9 +202,11 @@ def add_table_args(p: argparse.ArgumentParser) -> None:
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--lineup", default="baseline:4,random:2,station,maniac")
     p.add_argument("--variant", type=parse_variant, default=NLHE, help=VARIANT_SPEC_HELP)
-    p.add_argument("--schedule", choices=sorted(SCHEDULES), default="doubling")
-    p.add_argument("--payouts", default=",".join(str(x) for x in PLACEHOLDER_PAYOUTS),
-                   help="points by finishing place, 1st first")
+    p.add_argument("--schedule", default="doubling", help=SCHEDULE_SPEC_HELP)
+    p.add_argument("--hands-per-level", type=int, default=25)
+    p.add_argument("--stack", type=int, default=2000, help="starting stack")
+    p.add_argument("--payouts", default=",".join(f"{x:g}" for x in PLACEHOLDER_PAYOUTS),
+                   help="points by finishing place, 1st first (default: PAYOUTS in bot/icm.py)")
     p.add_argument("--max-hands", type=int, default=200)
     p.add_argument("--no-enforce-time", action="store_true",
                    help="don't auto-fold decisions that take more than 1 ms of CPU")
@@ -210,7 +215,8 @@ def add_table_args(p: argparse.ArgumentParser) -> None:
 def table_config(args: argparse.Namespace) -> TableConfig:
     return TableConfig(
         variant=args.variant,
-        schedule=SCHEDULES[args.schedule],
+        schedule=parse_schedule(args.schedule, args.hands_per_level),
+        starting_stack=args.stack,
         payouts=tuple(float(x) for x in args.payouts.split(",")),
         max_hands=args.max_hands,
         enforce_time=not args.no_enforce_time,

@@ -110,6 +110,39 @@ DOUBLING = BlindSchedule(tuple((10 * 2**i, 20 * 2**i, 0) for i in range(8)))
 X1_5 = BlindSchedule(tuple((bb // 2, bb, 0) for bb in (20, 30, 50, 70, 100, 150, 230, 350)))
 SCHEDULES = {"doubling": DOUBLING, "x1.5": X1_5}
 
+SCHEDULE_SPEC_HELP = (
+    "a preset (doubling, x1.5), the levels as sb/bb[/ante] separated by commas "
+    "(e.g. '10/20,15/30,25/50/5'; the last level repeats), or a growth rule "
+    "'bb=20,x=1.5[,ante=0.1][,levels=12]' (ante as a fraction of the big blind)"
+)
+
+
+def parse_schedule(spec: str, hands_per_level: int | None = None) -> BlindSchedule:
+    """A preset, an explicit level list, or a growth rule (see SCHEDULE_SPEC_HELP)."""
+    spec = spec.strip()
+    if spec in SCHEDULES:
+        levels = SCHEDULES[spec].levels
+    elif "/" in spec:
+        levels = []
+        for part in spec.split(","):
+            nums = [int(x) for x in part.strip().split("/")]
+            if len(nums) not in (2, 3):
+                raise ValueError(f"bad level {part!r}: {SCHEDULE_SPEC_HELP}")
+            levels.append((nums[0], nums[1], nums[2] if len(nums) == 3 else 0))
+        levels = tuple(levels)
+    else:
+        fields = dict(part.strip().split("=", 1) for part in spec.split(","))
+        bb, growth = float(fields.pop("bb")), float(fields.pop("x", 2))
+        ante, count = float(fields.pop("ante", 0)), int(fields.pop("levels", 12))
+        if fields:
+            raise ValueError(f"unknown schedule keys {sorted(fields)}: {SCHEDULE_SPEC_HELP}")
+        levels = []
+        for i in range(count):
+            big = int(round(bb * growth**i))
+            levels.append((big // 2, big, int(round(big * ante))))
+        levels = tuple(levels)
+    return BlindSchedule(levels, hands_per_level or 25)
+
 # Points by finishing place. One setting, in bot/icm.py, so the simulator
 # always scores by the same points the bot plays for.
 PLACEHOLDER_PAYOUTS = PAYOUTS

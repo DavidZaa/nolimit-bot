@@ -42,3 +42,23 @@ def test_cli_prints_a_report(capsys):
     out = capsys.readouterr().out
     assert "baseline" in out and "random" in out and "p99.9" in out
     assert "timed on cpu clock" in out or "timed on wall clock" in out
+
+
+def test_schedules_come_as_presets_level_lists_or_growth_rules():
+    from engine.rules import DOUBLING, parse_schedule
+
+    assert parse_schedule("doubling") == DOUBLING
+    assert parse_schedule("x1.5", 10).hands_per_level == 10
+    assert parse_schedule("10/20,15/30,25/50/5").levels == ((10, 20, 0), (15, 30, 0), (25, 50, 5))
+    grown = parse_schedule("bb=100,x=1.5,ante=0.1,levels=3").levels
+    assert grown == ((50, 100, 10), (75, 150, 15), (112, 225, 22))
+    with pytest.raises(ValueError):
+        parse_schedule("bb=20,speed=fast")
+
+
+def test_cli_plays_the_announced_structure(capsys):
+    main(["--tables", "3", "--lineup", "ours:2,pushfold:2,tag:2,random,maniac", "--no-enforce-time",
+          "--variant", "base=nlhe,hole=3", "--schedule", "25/50/5,50/100/10", "--hands-per-level", "10",
+          "--stack", "3000", "--payouts", "40,25,15,10,5,3,2,0"])
+    out = capsys.readouterr().out
+    assert "base=nlhe,hole=3" in out and "[40.0, 25.0, 15.0" in out
