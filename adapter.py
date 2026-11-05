@@ -2,6 +2,10 @@
 
 Everything else is written against bot.state. On kit day:
 
+  0. Set `PAYOUTS` in bot/icm.py to the announced points by finishing place
+     (1st first, one entry per seat). It's the only copy: the policy's ICM
+     plays by it and the simulator scores by it. Getting it wrong makes the
+     bot tighten or loosen up for the wrong prize structure.
   1. Read the kit's Agent template: method names, what an observation holds,
      how actions are returned, how cards are written.
   2. Rename/re-sign `Agent` below to match the template exactly.

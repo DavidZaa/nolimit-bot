@@ -8,6 +8,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from bot.icm import PAYOUTS
+
 # Hand categories. The numbers are identities, not strengths: a variant's
 # category_order decides which beats which.
 HIGH_CARD, PAIR, TWO_PAIR, TRIPS, STRAIGHT, FLUSH, FULL_HOUSE, QUADS, STRAIGHT_FLUSH = range(9)
@@ -60,8 +62,9 @@ DOUBLING = BlindSchedule(tuple((10 * 2**i, 20 * 2**i, 0) for i in range(8)))
 X1_5 = BlindSchedule(tuple((bb // 2, bb, 0) for bb in (20, 30, 50, 70, 100, 150, 230, 350)))
 SCHEDULES = {"doubling": DOUBLING, "x1.5": X1_5}
 
-# PLACEHOLDER(kit): points by finishing place, 1st first. Announced at kickoff.
-PLACEHOLDER_PAYOUTS = (50.0, 30.0, 20.0, 0.0, 0.0, 0.0, 0.0, 0.0)
+# Points by finishing place. One setting, in bot/icm.py, so the simulator
+# always scores by the same points the bot plays for.
+PLACEHOLDER_PAYOUTS = PAYOUTS
 
 
 @dataclass(frozen=True)

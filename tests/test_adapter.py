@@ -49,6 +49,15 @@ def test_built_bot_is_the_one_the_runner_calls_ours():
     assert type(build_bot().inner) is type(BOTS["ours"](0, TableConfig()).inner)
 
 
+def test_the_bot_and_the_simulator_use_the_one_points_setting():
+    from bot import icm
+    from engine.rules import PLACEHOLDER_PAYOUTS
+
+    assert build_bot().inner.payouts == tuple(icm.PAYOUTS)
+    assert PLACEHOLDER_PAYOUTS is icm.PAYOUTS
+    assert TableConfig().payouts is icm.PAYOUTS
+
+
 def test_built_bot_raises_aces_unopened():
     bot = build_bot()
     seen = []
