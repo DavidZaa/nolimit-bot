@@ -13,7 +13,7 @@ tuned, so the two are kept separate on purpose.
 
 from __future__ import annotations
 
-from bot.baseline import preflop_percentile
+from bot.preflop import CHEN
 from bot.hands import TOP_PAIR, TWO_PAIR_PLUS, made_hand
 from bot.state import CALL, CHECK, FOLD, RAISE, Action
 
@@ -69,12 +69,14 @@ def _last_raiser(state, street: int):
 
 
 class PushFoldBot:
+    ranks = CHEN  # starting-hand ranking; v3 stays on Chen so it remains a fixed reference
+
     def act(self, state) -> Action:
         if state.street != 0:
             return self._postflop(state)
         legal, seat = state.legal, state.seat
         bb = max(1, state.big_blind)
-        pct = preflop_percentile(state.hole)
+        pct = self.ranks.percentile(state.hole)
         depth = _depth_bb(state)
         highest = max(state.bets)
 

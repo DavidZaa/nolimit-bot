@@ -26,6 +26,7 @@ from __future__ import annotations
 
 from bot.hands import TOP_PAIR, WEAK_PAIR
 from bot.icm import PAYOUTS, bubble_factor
+from bot.preflop import ACTIVE
 from bot.pushfold import PushFoldBot, _last_raiser, seats_behind
 from bot.tracker import PRIORS, Tracker, start_stacks
 
@@ -47,9 +48,12 @@ ICM_SHOVE_POWER = 1.0  # first-in shove range likewise
 
 class PolicyBot(PushFoldBot):
     def __init__(self, features=None, payouts=PAYOUTS,
-                 icm_powers=(ICM_CALL_POWER, ICM_SHOVE_POWER), omaha_features=None):
+                 icm_powers=(ICM_CALL_POWER, ICM_SHOVE_POWER), omaha_features=None,
+                 ranks=None):
         """No `features` means the submitted configuration. `omaha_features`
-        defaults to the submitted Omaha set with it, and to `features` otherwise."""
+        defaults to the submitted Omaha set with it, and to `features` otherwise.
+        `ranks` defaults to the generated starting-hand table (Chen without one)."""
+        self.ranks = ACTIVE if ranks is None else ranks
         if features is None:
             features, default_omaha = DEFAULT_FEATURES, DEFAULT_OMAHA_FEATURES
         else:

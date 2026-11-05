@@ -20,6 +20,7 @@ from dataclasses import dataclass, field
 
 from bot.baseline import BaselineBot
 from bot.policy import FEATURES, V4_FEATURES, V5_FEATURES, PolicyBot
+from bot.preflop import CHEN
 from bot.pushfold import PushFoldBot
 from bot.safety import SafeBot
 from engine.field import CallingStation, ChenTAG, EquityCaller, FolderBot, Maniac, PushFold, RandomBot
@@ -28,16 +29,17 @@ from engine.rules import NLHE, PLACEHOLDER_PAYOUTS, SCHEDULES, VARIANT_SPEC_HELP
 from engine.sng import play_sng
 from engine.table import CLOCK_NAME
 
-def _policy(features=None, omaha_features=None):
+def _policy(features=None, omaha_features=None, ranks=None):
     # No features: the submitted configuration. Either way our bot plays by the
     # table's points, as it will once the real ones are set at kickoff.
     return lambda seed, config: SafeBot(
-        PolicyBot(features, payouts=config.payouts, omaha_features=omaha_features))
+        PolicyBot(features, payouts=config.payouts, omaha_features=omaha_features, ranks=ranks))
 
 
 # Every factory takes (seed, table config) and returns a fresh bot.
 BOTS = {
     "ours": _policy(),  # what adapter.build_bot() submits
+    "ours_chen": _policy(ranks=CHEN),  # the same, ignoring any generated hand-rank table
     "v5": _policy(V5_FEATURES, omaha_features=V4_FEATURES),
     "v4": _policy(V4_FEATURES),
     "v3": lambda seed, config: SafeBot(PushFoldBot()),
