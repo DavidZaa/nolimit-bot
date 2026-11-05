@@ -25,6 +25,12 @@ order works. Every class faces the same pool of opponents and boards, and
 each opponent's hand is scored once for the whole run: that halves the work
 and takes most of the noise out of the ranking, which is all the bot uses.
 The number of trials is set to fit --seconds on this machine.
+
+Five-card Omaha and bigger have too many classes to simulate in minutes, so
+they're ranked through sub-hands instead (see bot/preflop.py): the
+four-card table (cached in gen/tables/plo.py when the rules match, else
+simulated first), plus the spread of best-sub-hand scores over sampled
+hands to turn that into a share of five-card hands.
 """
 
 from __future__ import annotations
@@ -41,7 +47,9 @@ from pathlib import Path
 
 from bot.preflop import hand_class
 from engine.handeval import best_hand
-from engine.rules import NLHE, VARIANT_SPEC_HELP, parse_variant
+from engine.rules import NLHE, PLO, VARIANT_SPEC_HELP, parse_variant
+
+MAX_SIMULATED_HANDS = 500_000  # PLO's 270,725 starting hands simulate fine; five-card Omaha doesn't
 
 OUT = Path(__file__).resolve().parent.parent / "bot" / "hand_ranks_table.py"
 MIN_TRIALS, MAX_TRIALS = 150, 20_000
@@ -61,7 +69,7 @@ def _scenarios(variant, count: int, seed: int):
     """(cards used, opponent's score, board) for `count` random opponents and boards."""
     rng = random.Random(seed)
     deck = variant.deck()
-    k, b = variant.hole_cards, sum(variant.board_schedule)
+    k, b = variant.hole_cards, variant.board_size
     out = []
     for _ in range(count):
         cards = rng.sample(deck, k + b)
@@ -91,7 +99,7 @@ def _equities(spec: str, hands, trials: int, pool: int, seed: int) -> list[float
 
 def _clean_share(variant) -> float:
     """Chance a random scenario shares no card with a given starting hand."""
-    d, k, need = len(variant.deck()), variant.hole_cards, variant.hole_cards + sum(variant.board_schedule)
+    d, k, need = len(variant.deck()), variant.hole_cards, variant.hole_cards + variant.board_size
     return math.comb(d - k, need) / math.comb(d, need)
 
 
@@ -168,6 +176,56 @@ def write_table(path: Path, variant, percentiles: dict, trials: int) -> None:
     path.write_text("\n".join(lines) + "\n")
 
 
+def _same_rules(a, b) -> bool:
+    return (a.ranks, a.category_order, a.hole_cards_used) == (b.ranks, b.category_order, b.hole_cards_used)
+
+
+def rank_by_subsets(variant, seconds=240, workers=None, seed=0, samples=60_000, log=print):
+    """(sub-hand percentiles, sub-hand size, quantiles) for a variant with too many classes."""
+    import dataclasses
+
+    sub = 4 if variant.hole_cards_used else variant.hole_cards - 1
+    base = dataclasses.replace(variant, name=f"{variant.name} [{sub}-card sub-hands]", hole_cards=sub,
+                               preflop_board=0, board_schedule=(variant.board_size,))
+    cached = Path(__file__).resolve().parent / "tables" / "plo.py"
+    if sub == 4 and _same_rules(base, PLO) and cached.exists():
+        namespace: dict = {}
+        exec(compile(cached.read_text(), str(cached), "exec"), namespace)
+        percentiles = namespace["PERCENTILES"]
+        log(f"{variant.name}: using the cached four-card table ({len(percentiles):,} classes)")
+    else:
+        percentiles, _ = rank_hands(base, seconds, workers, seed, log=log)
+    rng = random.Random(seed)
+    deck = variant.deck()
+    scores = sorted(
+        min(percentiles[hand_class(h)] for h in combinations(rng.sample(deck, variant.hole_cards), sub))
+        for _ in range(samples)
+    )
+    quantiles = [scores[i * len(scores) // 1000] for i in range(1000)]
+    log(f"rescaled against {samples:,} sampled {variant.hole_cards}-card hands")
+    return percentiles, sub, quantiles
+
+
+def write_subset_table(path: Path, variant, percentiles: dict, sub: int, quantiles) -> None:
+    lines = [
+        f'"""Starting-hand ranking for {variant.name}, written by gen/hand_ranks.py.',
+        "",
+        f"Too many classes to simulate, so hands are judged by their best {sub}-card",
+        f"sub-hand, rescaled against sampled {variant.hole_cards}-card hands. Regenerate, don't edit.",
+        '"""',
+        "",
+        f"VARIANT = {variant.name!r}",
+        f"HOLE_CARDS = {variant.hole_cards}",
+        f"SUBSET = {sub}",
+        f"QUANTILES = {[round(q, 5) for q in quantiles]!r}",
+        "PERCENTILES = {",
+    ]
+    for key, p in sorted(percentiles.items(), key=lambda kv: kv[1]):
+        lines.append(f"    {key!r}: {p:.5f},")
+    lines.append("}")
+    path.write_text("\n".join(lines) + "\n")
+
+
 def main(argv=None) -> None:
     p = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     p.add_argument("--variant", type=parse_variant, default=NLHE, help=VARIANT_SPEC_HELP)
@@ -178,8 +236,13 @@ def main(argv=None) -> None:
     p.add_argument("--out", type=Path, default=OUT)
     args = p.parse_args(argv)
 
-    percentiles, trials = rank_hands(args.variant, args.seconds, args.workers, args.seed, args.trials)
-    write_table(args.out, args.variant, percentiles, trials)
+    v = args.variant
+    if math.comb(len(v.deck()), v.hole_cards) > MAX_SIMULATED_HANDS:
+        percentiles, sub, quantiles = rank_by_subsets(v, args.seconds, args.workers, args.seed)
+        write_subset_table(args.out, v, percentiles, sub, quantiles)
+    else:
+        percentiles, trials = rank_hands(v, args.seconds, args.workers, args.seed, args.trials)
+        write_table(args.out, v, percentiles, trials)
     print(f"wrote {args.out}")
 
 

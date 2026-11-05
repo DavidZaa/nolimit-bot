@@ -77,3 +77,17 @@ def test_odd_variants_can_be_ranked_too():
     p = lambda h: percentiles[hand_class(C(h))]
     assert p("AsAdAh") < 0.01 and p("2c3d4h") > p("AsAdAh")
 
+
+
+def test_big_hands_are_ranked_through_their_best_sub_hand():
+    from gen.hand_ranks import rank_by_subsets
+
+    five = parse_variant("base=plo,hole=5")
+    percentiles, sub, quantiles = rank_by_subsets(five, samples=5000, log=lambda *a: None)
+    assert sub == 4 and len(quantiles) == 1000 and quantiles == sorted(quantiles)
+    ranks = HandRanks(percentiles, 5, five.name, sub, quantiles)
+    p = lambda h: ranks.percentile(C(h))
+    assert p("AsAhKsKh2c") < 0.02 < p("JsTs9h8h2d") < p("Ks7d4h2c9s") < p("2s2h2d2c7h")
+    assert all(0 < p(h) < 1 for h in ("AsAhKsKh2c", "2s2h2d2c7h"))
+    # Adding a card can't make a hand worse than its best four-card part.
+    assert p("AsAhKsKh2c") <= p("AsAhKsKh7d") + 0.01
