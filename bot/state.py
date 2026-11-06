@@ -102,6 +102,7 @@ class HandResult:
     # The whole hand, forced posts included. PLACEHOLDER(kit): a kit may not
     # report this; the tracker falls back to what it saw in GameState.actions.
     actions: tuple[ActionRecord, ...] = ()
+    board: tuple[int, ...] = ()  # the full board, when the hand got that far
 
 
 def fallback_action(legal: LegalActions) -> Action:

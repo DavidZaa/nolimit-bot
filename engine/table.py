@@ -391,7 +391,7 @@ class _Hand:
                 won.update(winners)
 
         result = HandResult(self.hand_number, tuple(stacks), shown, tuple(sorted(won)),
-                            tuple(self.actions))
+                            tuple(self.actions), self.board)
         for s in self.alive:
             hook = getattr(self.bots[s], "hand_over", None)
             if hook is not None:

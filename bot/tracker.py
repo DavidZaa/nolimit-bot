@@ -31,9 +31,10 @@ INACTIVE_AFTER = 20  # hands without one voluntary chip before a seat counts as 
 class SeatStats:
     __slots__ = ("hands", "vpip", "shoves", "steals_faced", "steal_folds", "bets_faced", "bet_folds")
 
-    def __init__(self) -> None:
-        self.hands = self.vpip = self.shoves = 0
-        self.steals_faced = self.steal_folds = self.bets_faced = self.bet_folds = 0
+    def __init__(self, hands=0, vpip=0, shoves=0, steals_faced=0, steal_folds=0, bets_faced=0, bet_folds=0):
+        self.hands, self.vpip, self.shoves = hands, vpip, shoves
+        self.steals_faced, self.steal_folds = steals_faced, steal_folds
+        self.bets_faced, self.bet_folds = bets_faced, bet_folds
 
 
 def _estimate(observed: int, chances: int, prior: float) -> float:
@@ -55,7 +56,10 @@ def start_stacks(state) -> list[int]:
 
 
 class Tracker:
-    def __init__(self) -> None:
+    def __init__(self, external: bool = False) -> None:
+        """`external`: hands arrive through record_hand (the kit adapter) instead of
+        being inferred from decisions, so observe() does nothing."""
+        self.external = external
         self.seats: list[SeatStats] = []
         self._hand = None  # the hand in progress that hasn't been counted yet
         self._start = None  # its starting stacks, when known
@@ -65,11 +69,28 @@ class Tracker:
     # -- feeding it ----------------------------------------------------------
 
     def new_table(self, seat: int, num_seats: int) -> None:
-        self.__init__()
+        self.__init__(self.external)
         self.seats = [SeatStats() for _ in range(num_seats)]
+
+    def record_hand(self, actions, start) -> None:
+        """Count one finished hand: its full action log and everyone's starting stacks."""
+        if self.seats and actions:
+            self._record(actions, start)
+
+    def to_list(self) -> list[list[int]]:
+        return [[st.hands, st.vpip, st.shoves, st.steals_faced, st.steal_folds, st.bets_faced, st.bet_folds]
+                for st in self.seats]
+
+    @classmethod
+    def from_list(cls, rows, external: bool = True) -> "Tracker":
+        t = cls(external)
+        t.seats = [SeatStats(*map(int, row)) for row in rows]
+        return t
 
     def observe(self, state) -> None:
         """Call at the start of every decision."""
+        if self.external:
+            return
         if not self.seats:
             self.seats = [SeatStats() for _ in range(len(state.stacks))]
         if state.hand_number != self._hand:
