@@ -17,6 +17,9 @@ Stats:
   shove          hands it moved all-in with a preflop raise
   fold_to_steal  times it folded facing a single preflop raise nobody had called
   fold_to_bet    times it folded facing a bet after the flop
+  cbet           times it bet a heads-up flop nobody had bet yet, having made
+                 the last preflop raise: tells a seat that bets every flop it
+                 raised from one that only bets when it hits
 """
 
 from __future__ import annotations
@@ -24,17 +27,20 @@ from __future__ import annotations
 from bot.state import CALL, FOLD, POST_ANTE, POST_BB, POST_SB, RAISE
 
 PRIOR_WEIGHT = 10
-PRIORS = {"vpip": 0.25, "shove": 0.03, "fold_to_steal": 0.70, "fold_to_bet": 0.50}
+PRIORS = {"vpip": 0.25, "shove": 0.03, "fold_to_steal": 0.70, "fold_to_bet": 0.50, "cbet": 0.65}
 INACTIVE_AFTER = 20  # hands without one voluntary chip before a seat counts as broken
 
 
 class SeatStats:
-    __slots__ = ("hands", "vpip", "shoves", "steals_faced", "steal_folds", "bets_faced", "bet_folds")
+    __slots__ = ("hands", "vpip", "shoves", "steals_faced", "steal_folds", "bets_faced", "bet_folds",
+                 "cbet_chances", "cbets")
 
-    def __init__(self, hands=0, vpip=0, shoves=0, steals_faced=0, steal_folds=0, bets_faced=0, bet_folds=0):
+    def __init__(self, hands=0, vpip=0, shoves=0, steals_faced=0, steal_folds=0, bets_faced=0, bet_folds=0,
+                 cbet_chances=0, cbets=0):
         self.hands, self.vpip, self.shoves = hands, vpip, shoves
         self.steals_faced, self.steal_folds = steals_faced, steal_folds
         self.bets_faced, self.bet_folds = bets_faced, bet_folds
+        self.cbet_chances, self.cbets = cbet_chances, cbets
 
 
 def _estimate(observed: int, chances: int, prior: float) -> float:
@@ -78,13 +84,12 @@ class Tracker:
             self._record(actions, start)
 
     def to_list(self) -> list[list[int]]:
-        return [[st.hands, st.vpip, st.shoves, st.steals_faced, st.steal_folds, st.bets_faced, st.bet_folds]
-                for st in self.seats]
+        return [[getattr(st, f) for f in SeatStats.__slots__] for st in self.seats]
 
     @classmethod
     def from_list(cls, rows, external: bool = True) -> "Tracker":
         t = cls(external)
-        t.seats = [SeatStats(*map(int, row)) for row in rows]
+        t.seats = [SeatStats(*map(int, row)) for row in rows]  # shorter, older rows leave new counts at 0
         return t
 
     def observe(self, state) -> None:
@@ -118,6 +123,8 @@ class Tracker:
         shoved: set[int] = set()
         bets, put_in = [0] * n, [0] * n
         street, highest, raises, raise_called = 0, 0, 0, False
+        folded: set[int] = set()
+        opener = None  # the last preflop raiser
         for rec in actions:
             s, kind = rec.seat, rec.kind
             if not 0 <= s < n:
@@ -135,6 +142,8 @@ class Tracker:
             if kind in (POST_SB, POST_BB):
                 highest = max(highest, rec.amount)
                 continue
+            if kind == FOLD:
+                folded.add(s)
             seat = self.seats[s]
             if street == 0:
                 if kind in (CALL, RAISE):
@@ -144,6 +153,7 @@ class Tracker:
                     seat.steal_folds += kind == FOLD
                 if kind == RAISE:
                     raises += 1
+                    opener = s
                     if start is not None and 0 < start[s] <= put_in[s]:
                         shoved.add(s)
                 elif kind == CALL and raises:
@@ -151,6 +161,9 @@ class Tracker:
             elif facing:
                 seat.bets_faced += 1
                 seat.bet_folds += kind == FOLD
+            elif street == 1 and s == opener and len(dealt - folded) == 2:
+                seat.cbet_chances += 1
+                seat.cbets += kind == RAISE
             if kind == RAISE:
                 highest = rec.amount
         for s in dealt:
@@ -182,6 +195,10 @@ class Tracker:
     def fold_to_bet(self, s: int) -> float:
         st = self._seat(s)
         return _estimate(st.bet_folds, st.bets_faced, PRIORS["fold_to_bet"])
+
+    def cbet(self, s: int) -> float:
+        st = self._seat(s)
+        return _estimate(st.cbets, st.cbet_chances, PRIORS["cbet"])
 
     def inactive(self, s: int) -> bool:
         """Broken or timing out: it hasn't put in a voluntary chip in INACTIVE_AFTER hands."""

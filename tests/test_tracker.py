@@ -4,7 +4,9 @@ import random
 
 import pytest
 
-from bot.state import CALL, CHECK, RAISE, Action, ActionRecord, HandResult, fallback_action
+from bot.state import (
+    CALL, CHECK, FOLD, POST_BB, POST_SB, RAISE, Action, ActionRecord, HandResult, fallback_action,
+)
 from bot.tracker import INACTIVE_AFTER, PRIORS, Tracker
 from engine.field import CallingStation, FolderBot, Maniac
 from engine.rules import TableConfig
@@ -109,3 +111,31 @@ def test_a_seat_count_mismatch_or_junk_seat_never_crashes():
     t.hand_over(HandResult(1, (1990, 1980), {}, (1,), log))
     assert t.hands(0) == 1 and t.hands(7) == 0
     assert t.vpip(99) == PRIORS["vpip"]
+
+
+def _hand(*flop, callers=(3,)):
+    """Seat 0 opens, `callers` call in the big blind's place, then `flop` happens."""
+    acts = [ActionRecord(1, 0, POST_SB, 10), ActionRecord(2, 0, POST_BB, 20), ActionRecord(0, 0, RAISE, 50)]
+    acts += [ActionRecord(s, 0, CALL, 50) for s in callers]
+    acts += [ActionRecord(s, 0, FOLD, 0) for s in (1, 2) if s not in callers]
+    return acts + [ActionRecord(s, 1, kind, amount) for s, kind, amount in flop]
+
+
+def test_cbets_count_only_the_opener_on_a_heads_up_flop_nobody_bet():
+    t = Tracker(external=True)
+    t.new_table(0, 8)
+    t.record_hand(_hand((3, CHECK, 0), (0, RAISE, 60), (3, FOLD, 0)), None)  # c-bet
+    t.record_hand(_hand((3, CHECK, 0), (0, CHECK, 0)), None)  # gave up
+    t.record_hand(_hand((3, RAISE, 40), (0, FOLD, 0)), None)  # donked into: no chance
+    t.record_hand(_hand((3, CHECK, 0), (2, CHECK, 0), (0, RAISE, 60), callers=(2, 3)), None)  # multiway
+    assert (t.seats[0].cbet_chances, t.seats[0].cbets) == (2, 1)
+    assert t.seats[3].cbet_chances == 0  # not the opener
+    assert t.cbet(0) == (1 + PRIORS["cbet"] * 10) / (2 + 10)
+
+
+def test_memory_written_before_the_cbet_counter_still_loads():
+    old_row = [30, 9, 1, 12, 10, 5, 3]  # the seven counts memory carried before
+    t = Tracker.from_list([old_row] * 8)
+    assert t.hands(4) == 30 and t.seats[4].bet_folds == 3
+    assert t.cbet(4) == PRIORS["cbet"]
+    assert Tracker.from_list(t.to_list()).to_list() == t.to_list()

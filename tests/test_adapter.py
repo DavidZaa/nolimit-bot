@@ -30,14 +30,27 @@ def kit_state(events=(), legal=None, phase="betting", payouts=(50, 30, 20), memo
                      config=sdk.Config(payouts=tuple(payouts)))
 
 
+class TrackerTwin(Twin):
+    """A Twin that also checks, at every decision, that the tracker the agent rebuilt
+    from events and memory holds exactly the counts of the one fed directly."""
+
+    def act(self, state):
+        action = super().act(state)
+        direct = self.primary.inner.tracker.to_list()
+        if load_memory(self.shadow.memory)[0].to_list() != direct:
+            self.splits.append((state, "tracker", direct))
+        return action
+
+
 @pytest.mark.parametrize("variant", [NLHE, SHORT_DECK, PLO], ids=lambda v: v.name)
 def test_through_the_protocol_it_plays_exactly_like_the_direct_bot(variant):
     # Fresh Agent every decision, state only in memory, seats anonymised: same decisions,
-    # so the tracker rebuilt from events matches the one fed directly.
+    # and the tracker rebuilt from events matches the one fed directly, count for count.
     cfg = TableConfig(variant=variant, enforce_time=False)
     splits, twins = [], []
     for t in range(6):
-        pair = [Twin(SafeBot(PolicyBot(payouts=cfg.payouts)), KitSeat(Agent, cfg), splits) for _ in range(3)]
+        pair = [TrackerTwin(SafeBot(PolicyBot(payouts=cfg.payouts)), KitSeat(Agent, cfg), splits)
+                for _ in range(3)]
         twins += pair
         bots = pair + [ChenTAG(), EquityCaller(), Maniac(), FolderBot(), PushFold()]
         random.Random(t).shuffle(bots)

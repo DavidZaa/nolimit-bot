@@ -37,4 +37,4 @@ def test_styles_come_back_out_of_a_history(tmp_path):
     assert stats["maniac"].shoves >= 0.9 * stats["maniac"].hands
     assert stats["folder"].steal_folds == stats["folder"].steals_faced > 0
     text = report(stats)
-    assert "maniac" in text and "fold/steal" in text
+    assert "maniac" in text and "fold/steal" in text and "cbet" in text

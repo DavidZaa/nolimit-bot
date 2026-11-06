@@ -2,8 +2,8 @@
 
     python scripts/hh_stats.py ROUND.jsonl.gz [--min-hands 50]
 
-Prints VPIP, preflop shove rate, fold to a steal and fold to a postflop bet
-for every player, pooled over every table in the file, so we can see what the
+Prints VPIP, preflop shove rate, fold to a steal, fold to a postflop bet and
+heads-up c-bet rate for every player, pooled over every table in the file, so we can see what the
 real field does and retune the tracker's priors between rounds.
 
 The events are fed through bot.events.TableLog and bot.tracker.Tracker, the
@@ -100,12 +100,14 @@ def _rate(hits: int, chances: int) -> str:
 
 
 def report(totals, min_hands: int = 0) -> str:
-    lines = [f"{'player':<24}{'hands':>7}  {'VPIP':>14}  {'shove':>14}  {'fold/steal':>14}  {'fold/bet':>14}"]
+    lines = [f"{'player':<24}{'hands':>7}  {'VPIP':>14}  {'shove':>14}  {'fold/steal':>14}  {'fold/bet':>14}"
+             f"  {'cbet':>14}"]
     for name, st in sorted(totals.items(), key=lambda kv: -kv[1].hands):
         if st.hands < min_hands:
             continue
         lines.append(f"{name[:24]:<24}{st.hands:>7}  {_rate(st.vpip, st.hands)}  {_rate(st.shoves, st.hands)}  "
-                     f"{_rate(st.steal_folds, st.steals_faced)}  {_rate(st.bet_folds, st.bets_faced)}")
+                     f"{_rate(st.steal_folds, st.steals_faced)}  {_rate(st.bet_folds, st.bets_faced)}  "
+                     f"{_rate(st.cbets, st.cbet_chances)}")
     return "\n".join(lines)
 
 
