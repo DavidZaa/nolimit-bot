@@ -4,7 +4,7 @@ import random
 
 import pytest
 
-from bot.hands import MONSTER, NOTHING, TOP_PAIR, TWO_PAIR_PLUS, WEAK_PAIR, made_hand
+from bot.hands import MONSTER, NOTHING, TOP_PAIR, TWO_PAIR_PLUS, WEAK_PAIR, made_hand, strong_draw
 from bot.pushfold import PushFoldBot
 from bot.state import CALL, CHECK, FOLD, RAISE, Action, cards_from_str
 from engine import field
@@ -136,3 +136,18 @@ def test_unwrapped_it_always_plays_legally(variant):
         random.Random(t).shuffle(bots)
         res = play_sng(bots, config, seed=t)
         assert sum(res.stats.errors) == sum(res.stats.illegal) == 0
+
+
+@pytest.mark.parametrize("hole, board, draw", [
+    ("Ah5h", "Kh9h4d", True),  # nut flush draw
+    ("9h8c", "Kh7h4h", True),  # one card to a flush draw
+    ("Ac5c", "Kh9h4h", False),  # the flush draw is all on the board
+    ("9c8d", "Th7s2d", True),  # open-ender
+    ("5c4d", "3h2s9d", True),  # 2-3-4-5: the ace fills below
+    ("KcQd", "JhTs2d", True),  # T-J-Q-K: a nine or an ace
+    ("AcKd", "QhJs2d", False),  # J-Q-K-A only fills with a ten
+    ("Kc2d", "Th9s8d", False),  # 8-9-T-? with no hole card in the run
+    ("Ah5hKdQd", "Kh9h4d", False),  # Omaha isn't read for draws
+])
+def test_strong_draws(hole, board, draw):
+    assert strong_draw(cards_from_str(hole), cards_from_str(board)) is draw

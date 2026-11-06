@@ -19,7 +19,7 @@ from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass, field
 
 from bot.baseline import BaselineBot
-from bot.policy import FEATURES, V4_FEATURES, V5_FEATURES, PolicyBot
+from bot.policy import FEATURES, V4_FEATURES, V5_FEATURES, V6_FEATURES, PolicyBot
 from bot.preflop import CHEN
 from bot.pushfold import PushFoldBot
 from bot.safety import SafeBot
@@ -53,6 +53,7 @@ BOTS = {
     "kit": lambda seed, config: _kit_seat(config),  # the same, through the kit protocol and memory
     "ours_chen": _policy(ranks=CHEN),  # the same, ignoring any generated hand-rank table
     "v5": _policy(V5_FEATURES, omaha_features=V4_FEATURES),
+    "v6": _policy(V6_FEATURES, omaha_features=V4_FEATURES),  # v5 + defend, on trial
     "v4": _policy(V4_FEATURES),
     "v3": lambda seed, config: SafeBot(PushFoldBot()),
     "baseline": lambda seed, config: SafeBot(BaselineBot()),

@@ -4,7 +4,7 @@ import random
 
 import pytest
 
-from bot.policy import FEATURES, V4_FEATURES, V5_FEATURES, PolicyBot
+from bot.policy import FEATURES, V4_FEATURES, V5_FEATURES, V6_FEATURES, PolicyBot
 from bot.preflop import CHEN
 from bot.pushfold import PushFoldBot
 from bot.state import CALL, CHECK, FOLD, RAISE, Action, fallback_action
@@ -195,3 +195,74 @@ def test_unwrapped_it_always_plays_legally(variant):
         random.Random(t).shuffle(bots)
         res = play_sng(bots, config, seed=t)
         assert sum(res.stats.errors) == sum(res.stats.illegal) == 0
+
+
+# -- defend (on trial: v5 + defend measured no better, see V6_FEATURES) ---------------
+
+def with_stats(features, **seats):
+    """A PolicyBot whose tracker already holds `seats` (seat number -> SeatStats fields)."""
+    bot = PolicyBot(features)
+    bot.tracker.new_table(0, 8)
+    for name, fields in seats.items():
+        for field, value in fields.items():
+            setattr(bot.tracker.seats[int(name[1:])], field, value)
+    return bot
+
+
+class ChecksPreflop:
+    """Checks its big-blind option, then lets `bot` play the flop."""
+
+    def __init__(self, bot):
+        self.bot = bot
+
+    def act(self, state):
+        return Action(CHECK) if state.street == 0 else self.bot.act(state)
+
+
+def flop_answer(bot, hole, bet=30):
+    """We're the big blind; seat 3 limps, we check our option and the flop, and it bets."""
+    limp_then_bet = {3: Scripted(Action(CALL), Action(RAISE, bet))}
+    seen = decisions(ChecksPreflop(bot), 2, hole, "Kh9h4d2c5c", others=limp_then_bet)
+    state, action = next((st, a) for st, a in seen if st.street == 1 and not st.legal.can_check)
+    assert state.legal.call_amount == bet  # really facing its flop bet
+    return action
+
+
+AUTO_CBETTOR = {"cbet_chances": 10, "cbets": 10}
+HONEST_BETTOR = {"cbet_chances": 10, "cbets": 0}
+
+
+@pytest.mark.parametrize("hole", ["9c8d", "Ah5h"], ids=["second pair", "flush draw"])
+def test_defend_calls_a_flop_bet_from_a_seat_that_bets_every_flop(hole):
+    assert flop_answer(with_stats(V6_FEATURES, s3=AUTO_CBETTOR), hole) == Action(CALL)
+    assert flop_answer(with_stats(V6_FEATURES, s3=HONEST_BETTOR), hole) == Action(FOLD)
+    assert flop_answer(with_stats(V5_FEATURES, s3=AUTO_CBETTOR), hole) == Action(FOLD)
+
+
+def test_defend_still_folds_air_and_overbets():
+    assert flop_answer(with_stats(V6_FEATURES, s3=AUTO_CBETTOR), "7c6d") == Action(FOLD)
+    assert flop_answer(with_stats(V6_FEATURES, s3=AUTO_CBETTOR), "9c8d", bet=200) == Action(FOLD)
+
+
+def resteal_answer(bot, opener, stack_bb=24):
+    stacks = [stack_bb * 20] * 8
+    state, action = decisions(bot, 2, "KsQd", "Kh7s2dJc4h", stacks=stacks,
+                              others={opener: Scripted(Action(RAISE, 50))})[0]
+    assert max(state.bets) == 50
+    return action
+
+
+FOLDS_TO_STEALS = {"steals_faced": 20, "steal_folds": 19}
+DEFENDS_STEALS = {"steals_faced": 20, "steal_folds": 5}
+
+
+def test_defend_reshoves_over_a_late_open_from_a_seat_that_folds_to_steals():
+    shove = Action(RAISE, 480)
+    assert resteal_answer(with_stats(V6_FEATURES, s0=FOLDS_TO_STEALS), opener=0) == shove
+    assert resteal_answer(with_stats(V5_FEATURES, s0=FOLDS_TO_STEALS), opener=0) == Action(FOLD)
+
+
+def test_defend_leaves_early_opens_sticky_openers_and_deep_stacks_alone():
+    assert resteal_answer(with_stats(V6_FEATURES, s3=FOLDS_TO_STEALS), opener=3) == Action(FOLD)
+    assert resteal_answer(with_stats(V6_FEATURES, s0=DEFENDS_STEALS), opener=0) == Action(FOLD)
+    assert resteal_answer(with_stats(V6_FEATURES, s0=FOLDS_TO_STEALS), opener=0, stack_bb=60) == Action(FOLD)

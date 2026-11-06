@@ -13,6 +13,10 @@ Every adjustment is a named feature so each can be measured on its own
           of players who could wake up with a hand
   icm     tighten all-in calls and first-in shoves by the bubble factor
           against the player who could bust us, from the real payouts
+  defend  stop folding to seats that c-bet every flop: call one heads-up
+          flop bet with any pair or a strong draw (two pair and up already
+          raise), and re-shove 15-25 BB over late-position opens from seats
+          that fold too much to steals
 
 With no features it plays exactly like PushFoldBot.
 
@@ -24,15 +28,17 @@ and the preflop ranking only sees the best two of the four cards.
 
 from __future__ import annotations
 
-from bot.hands import TOP_PAIR, WEAK_PAIR
+from bot.hands import TOP_PAIR, WEAK_PAIR, strong_draw
 from bot.icm import PAYOUTS, cached_bubble_factor
 from bot.preflop import ACTIVE
+from bot.state import CALL, RAISE
 from bot.pushfold import PushFoldBot, _last_raiser, seats_behind
 from bot.tracker import PRIORS, Tracker, start_stacks
 
-FEATURES = ("shoves", "steals", "cbets", "broken", "icm")
+FEATURES = ("shoves", "steals", "cbets", "broken", "icm", "defend")
 V4_FEATURES = ("shoves", "steals", "cbets", "broken")
 V5_FEATURES = ("steals", "cbets", "broken", "icm")
+V6_FEATURES = V5_FEATURES + ("defend",)  # candidate, not submitted until it clears both fields
 # What PolicyBot() and the submission play, for hold'em-style and Omaha hands.
 DEFAULT_FEATURES, DEFAULT_OMAHA_FEATURES = V5_FEATURES, V4_FEATURES
 OMAHA_HOLE_CARDS = 4
@@ -44,6 +50,12 @@ STICKY = 0.25  # fold-to-bet below this: value-bet thin and big, never bluff
 CBET_FOLDS = 0.35  # fold-to-bet needed before continuation-betting air
 ICM_CALL_POWER = 1.0  # calling range shrinks by bubble_factor ** this
 ICM_SHOVE_POWER = 1.0  # first-in shove range likewise
+CBET_DEFEND = 0.7  # the bettor's c-bet rate from which we stop folding pairs and draws
+RESTEAL_DEPTH_BB = (15, 25)
+RESTEAL_FOLDS = 0.8  # the opener's fold-to-steal from which it gets re-shoved on
+RESTEAL = 0.15  # share of hands to re-shove with, before ICM and players left behind us
+LATE = 3  # an open with at most this many players left behind it (CO, button, SB)
+STEAL_SIZE_BB = 4  # opens bigger than this aren't steals
 
 
 class PolicyBot(PushFoldBot):
@@ -148,3 +160,25 @@ class PolicyBot(PushFoldBot):
         if cbet and folds >= CBET_FOLDS:
             return state.pot // 2
         return None
+
+    def _defends(self, state, strength):
+        if "defend" not in self.active or state.street != 1 or sum(state.in_hand) != 2:
+            return False
+        flop = [rec for rec in state.actions if rec.street == 1 and rec.kind == RAISE]
+        if len(flop) != 1 or self.tracker.cbet(flop[0].seat) < CBET_DEFEND:
+            return False  # a raise, or a bettor who doesn't bet every flop: believe it
+        return strength >= WEAK_PAIR or strong_draw(state.hole, state.board)
+
+    def _resteal_range(self, state, depth_bb):
+        if "defend" not in self.active or not RESTEAL_DEPTH_BB[0] <= depth_bb <= RESTEAL_DEPTH_BB[1]:
+            return 0.0
+        preflop = [rec for rec in state.actions if rec.street == 0 and rec.kind in (RAISE, CALL)]
+        if len(preflop) != 1 or preflop[0].kind != RAISE:
+            return 0.0  # only a lone open, nobody in with it yet
+        opener, bb = preflop[0].seat, max(1, state.big_blind)
+        if (state.stacks[opener] == 0 or preflop[0].amount > STEAL_SIZE_BB * bb
+                or len(seats_behind(state, opener)) > LATE
+                or self.tracker.fold_to_steal(opener) < RESTEAL_FOLDS):
+            return 0.0
+        waiting = self._still_to_act(state, state.seat, opener)
+        return RESTEAL / (1 + 0.5 * waiting) / self._call_tightness(state, opener)

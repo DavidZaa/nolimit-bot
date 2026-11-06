@@ -91,6 +91,9 @@ class PushFoldBot:
                 return _raise_to(legal, OPEN_TO_BB * bb)
             return _check_or(legal, call=False)
 
+        if pct <= self._resteal_range(state, depth):
+            return _raise_to(legal, legal.max_raise_to)
+
         if legal.call_amount >= 0.4 * state.stacks[seat] or depth <= SHOVE_CALL_DEPTH_BB:
             # Effectively all-in: get it in with the top of the range they'd shove.
             raiser = _last_raiser(state, 0)
@@ -114,7 +117,8 @@ class PushFoldBot:
         if strength >= TWO_PAIR_PLUS:
             return _raise_to(legal, 3 * max(state.bets))
         pot_sized_or_less = legal.call_amount * 2 <= state.pot  # the pot already holds the bet
-        return _check_or(legal, call=strength >= TOP_PAIR and pot_sized_or_less)
+        stays = strength >= TOP_PAIR or self._defends(state, strength)
+        return _check_or(legal, call=stays and pot_sized_or_less)
 
     # -- reads the tracker-driven policy refines ------------------------------
 
@@ -145,6 +149,14 @@ class PushFoldBot:
         """Others still in with chips who could overcall behind us."""
         return sum(1 for s in range(len(state.stacks))
                    if s not in (seat, raiser) and state.in_hand[s] and state.stacks[s] > 0)
+
+    def _resteal_range(self, state, depth_bb: float) -> float:
+        """Share of hands to re-shove over a raise as a resteal, on top of the usual ranges."""
+        return 0.0
+
+    def _defends(self, state, strength: int) -> bool:
+        """Call a bet with less than top pair (the call must still be pot-sized or less)."""
+        return False
 
     def _bet_when_checked_to(self, state, strength: int):
         """Bet size when nobody has bet this street, or None to check."""

@@ -73,6 +73,26 @@ def _omaha_level(hole, board) -> int:
     return best
 
 
+def strong_draw(hole, board) -> bool:
+    """A flush draw or an open-ended straight draw that uses a hole card.
+
+    Hold'em-style hands only (Omaha returns False): four to a flush, or four
+    ranks in a row open at both ends, with at least one card from the hand.
+    """
+    if len(hole) >= 4:
+        return False
+    suits = [0, 0, 0, 0]
+    for c in (*hole, *board):
+        suits[c & 3] += 1
+    if any(suits[c & 3] == 4 for c in hole):
+        return True
+    ranks = {c >> 2 for c in (*hole, *board)}
+    mine = {c >> 2 for c in hole}
+    # Four in a row from 2-3-4-5 (the ace fills below) up to 9-T-J-Q (the king fills above).
+    return any(mine.intersection(range(low, low + 4)) and all(r in ranks for r in range(low, low + 4))
+               for low in range(9))
+
+
 def made_hand(hole, board) -> int:
     """Bucket a postflop hand. A pair that's only on the board counts as nothing."""
     if len(hole) + len(board) < 5:
