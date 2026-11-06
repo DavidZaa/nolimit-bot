@@ -1,109 +1,234 @@
-"""The only file that knows the starter kit's API.
+"""The tournament entry point: the only file that knows the starter kit's protocol.
 
-Everything else is written against bot.state. On kit day:
+Shipped as agent.py (scripts/pack.sh), next to bot/. The kit calls
+Agent().act(state, memory) for every decision and wants (Action, bytes) back.
+A pool of forked copies serves the tables and any copy may answer any table,
+so nothing here keeps state on self or in globals between calls: the
+opponent tracker and the current hand's action log travel in `memory`,
+rebuilt at the start of each call from compact JSON and written back at the
+end. Bad or foreign memory starts the table fresh rather than failing.
 
-  0. Set `PAYOUTS` in bot/icm.py to the announced points by finishing place
-     (1st first, one entry per seat). It's the only copy: the policy's ICM
-     plays by it and the simulator scores by it. Getting it wrong makes the
-     bot tighten or loosen up for the wrong prize structure.
-  1. Read the kit's Agent template: method names, what an observation holds,
-     how actions are returned, how cards are written.
-  2. Rename/re-sign `Agent` below to match the template exactly.
-  3. Fill in `to_game_state` and `to_kit_action` (the PLACEHOLDER(kit) spots).
-     If the kit reports finished hands, fill in `to_hand_result` and call
-     `Agent.hand_over` from its end-of-hand hook: the opponent tracker then
-     sees what happened after we folded, not just the hands we played.
-  4. Run `pytest tests/test_adapter.py` plus a few hands in the kit's own
-     simulator, then submit. The bot behind it is already tested.
-
-Anything the kit doesn't expose (antes, other seats' bets) can be left at a
-neutral value. The push/fold bot needs stacks, bets, blinds, positions, the
-board and the legal actions; the action log only sharpens two reads (who
-raised, for shove ranges and continuation bets) and can be left empty.
+Kit-day checklist (names below follow the organizers' published description;
+each is a PLACEHOLDER(kit) until checked against the real SDK):
+  1. Diff kitsim/poker_agent_sdk against the real SDK: Action constructors,
+     state.can(), legal action kinds and min/max, event kinds and fields,
+     seats/status names, state.blinds, state.config.payouts.
+  2. Hand rankings: if the variant isn't plain hold'em, install a table
+     (gen/hand_ranks.py docstring). Payouts need no step: every table's own
+     state.config.payouts drives the ICM.
+  3. pytest -q; then the kit's own `poker-agent check` and a `poker-agent play`
+     run against its examples; then scripts/pack.sh and upload.
 """
 
 from __future__ import annotations
 
-from bot.policy import PolicyBot
-from bot.runtime import tune_gc
-from bot.safety import SafeBot
-from bot.state import (
-    CALL, CHECK, FOLD, RAISE, Action, GameState, HandResult, LegalActions, card_from_str,
+import json
+import os
+import sys
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))  # bot/ sits next to agent.py
+
+import poker_agent_sdk as sdk  # noqa: E402
+
+from bot.events import TableLog  # noqa: E402
+from bot.icm import PAYOUTS  # noqa: E402
+from bot.policy import PolicyBot  # noqa: E402
+from bot.runtime import tune_gc  # noqa: E402
+from bot.safety import SafeBot  # noqa: E402
+from bot.state import (  # noqa: E402
+    CALL, CHECK, FOLD, POST_BB, POST_SB, RAISE, Action, GameState, LegalActions, card_from_str,
 )
+from bot.tracker import Tracker  # noqa: E402
+
+MEMORY_VERSION = 1
+MEMORY_BUDGET = 16_000  # bytes; the kit allows 64 KB but anything past ~16 KB costs decision time
+IN_HAND = ("active", "all_in")
+
+
+# -- memory ------------------------------------------------------------------
+
+def load_memory(memory) -> tuple[Tracker, TableLog]:
+    """The table's tracker and log from last call's bytes; anything unreadable starts fresh."""
+    try:
+        doc = json.loads(memory)
+        if doc[0] != MEMORY_VERSION:
+            raise ValueError("other version")
+        return Tracker.from_list(doc[1]), TableLog.from_list(doc[2])
+    except Exception:
+        return Tracker(external=True), TableLog()
+
+
+def dump_memory(tracker: Tracker, log: TableLog) -> bytes:
+    out = json.dumps([MEMORY_VERSION, tracker.to_list(), log.to_list()], separators=(",", ":")).encode()
+    if len(out) > MEMORY_BUDGET:  # never seen in testing; drop the in-hand log, keep the counts
+        log.records, log.counted = [], True
+        out = json.dumps([MEMORY_VERSION, tracker.to_list(), log.to_list()], separators=(",", ":")).encode()
+    return out
+
+
+# -- state ---------------------------------------------------------------------
+
+def seat_index(state) -> dict:
+    """The kit's seat ids (anonymised per table) -> 0..n-1, in seat order."""
+    return {s.seat: i for i, s in enumerate(sorted(state.seats, key=lambda s: s.seat))}
+
+
+def to_card(kit_card) -> int:
+    return card_from_str(str(kit_card))
+
+
+def _blinds(state, log: TableLog) -> tuple[int, int, int]:
+    """(small, big, ante) for this hand, from state.blinds, else from what was posted."""
+    raw = getattr(state, "blinds", None)
+    try:
+        if hasattr(raw, "big"):
+            return int(raw.small), int(raw.big), int(getattr(raw, "ante", 0) or 0)
+        nums = [int(x) for x in raw]
+        return nums[0], nums[1], nums[2] if len(nums) > 2 else 0
+    except Exception:
+        posts = {k: a for _, st, k, a in log.records if st == 0 and k in (POST_SB, POST_BB)}
+        big = posts.get(POST_BB, 0)
+        return posts.get(POST_SB, big // 2), big, 0
+
+
+def legal_actions(state, stack: int) -> LegalActions:
+    fold, check, call, raise_ = (state.can(k) for k in ("fold", "check", "call", "raise"))
+    to_call = min(int(getattr(state, "to_call", 0) or 0), stack)
+    if raise_ is not None:
+        lo, hi = int(raise_.min_amount), int(raise_.max_amount)
+    else:
+        lo = hi = 0
+    return LegalActions(fold is not None, check is not None, call is not None, to_call,
+                        raise_ is not None and hi >= lo > 0, lo if raise_ else 0, hi if raise_ else 0)
+
+
+def to_game_state(state, log: TableLog, index: dict) -> GameState:
+    n = len(index)
+    seats = sorted(state.seats, key=lambda s: s.seat)
+    stacks = tuple(int(s.stack) for s in seats)
+    bets = tuple(int(s.bet) for s in seats)
+    in_hand = tuple(s.status in IN_HAND for s in seats)
+    me = index[state.seat]
+    button = index.get(state.button, 0)
+    sb_seat = bb_seat = None
+    for seat, street, kind, _ in log.records:
+        if street == 0 and kind == POST_SB and sb_seat is None:
+            sb_seat = seat
+        elif street == 0 and kind == POST_BB and bb_seat is None:
+            bb_seat = seat
+    if bb_seat is None:  # nothing posted that we saw: the seats after the button
+        alive = [i for i in range(1, n + 1) if stacks[(button + i) % n] or bets[(button + i) % n]]
+        sb_seat = (button + alive[0]) % n if alive else button
+        bb_seat = (button + alive[1]) % n if len(alive) > 1 else sb_seat
+    sb, bb, ante = _blinds(state, log)
+    return GameState(
+        hand_number=int(state.hand_number), seat=me, num_seats=n, button=button,
+        sb_seat=sb_seat if sb_seat is not None else button, bb_seat=bb_seat,
+        small_blind=sb, big_blind=bb, ante=ante, street=log.street,
+        hole=tuple(to_card(c) for c in state.cards), board=tuple(to_card(c) for c in state.board),
+        stacks=stacks, bets=bets, pot=int(state.pot), in_hand=in_hand,
+        players_left=int(getattr(state, "players_remaining", 0) or sum(1 for s in stacks if s)),
+        legal=legal_actions(state, stacks[me]), actions=log.actions(),
+    )
+
+
+# -- actions ---------------------------------------------------------------------
+
+def automatic(state):
+    """What the kit plays itself when neither check nor fold is offered: the first legal kind."""
+    first = state.legal_actions[0]
+    return sdk.Action(first.kind, first.min_amount)
+
+
+def to_kit_action(action: Action, state):
+    can = state.can
+    kind = action.kind
+    if kind == RAISE and can("raise") is not None:
+        r = can("raise")
+        return sdk.Action.raise_to(max(int(r.min_amount), min(int(action.amount), int(r.max_amount))))
+    if kind in (RAISE, CALL) and can("call") is not None:
+        return sdk.Action.call()
+    if kind != FOLD and can("check") is not None:
+        return sdk.Action.check()
+    if can("fold") is not None:
+        return sdk.Action.fold()
+    if can("check") is not None:
+        return sdk.Action.check()
+    return automatic(state)
+
+
+def _fallback(state):
+    if state.can("check") is not None:
+        return sdk.Action.check()
+    if state.can("fold") is not None:
+        return sdk.Action.fold()
+    return automatic(state)
+
+
+# -- the agent --------------------------------------------------------------------
+
+def decide(state, memory: bytes):
+    """One decision: rebuild the table from memory, catch up on events, act, write memory."""
+    tracker, log = load_memory(memory)
+    try:
+        index = seat_index(state)
+        if not tracker.seats:
+            tracker.seats = Tracker.from_list([[0] * 7 for _ in index]).seats
+        cfg = state.config
+        log.feed(state.events, index, tracker, int(getattr(cfg, "starting_stack", 0) or 0), len(index))
+        new_memory = dump_memory(tracker, log)
+    except Exception:
+        return _fallback(state), memory
+    try:
+        if getattr(state, "phase", "betting") != "betting" or not any(
+                state.can(k) for k in ("fold", "check", "call", "raise")):
+            return automatic(state), new_memory
+        payouts = tuple(float(p) for p in (getattr(cfg, "payouts", None) or PAYOUTS))
+        policy = PolicyBot(payouts=payouts)
+        policy.tracker = tracker
+        action = SafeBot(policy).act(to_game_state(state, log, index))
+        return to_kit_action(action, state), new_memory
+    except Exception:
+        return _fallback(state), new_memory
+
+
+class Agent(sdk.Agent):
+    def act(self, state, memory):
+        return decide(state, memory)
 
 
 def build_bot():
-    """The policy we play (v5): push/fold adjusted per seat by the opponent
-    tracker, with all-ins weighed by ICM on the announced points.
+    """The strategy behind the agent, for local engine runs: PolicyBot (v5) behind SafeBot.
 
     Fallbacks if it misbehaves against the real kit, in order:
-    PolicyBot(V4_FEATURES) (no ICM, so no dependence on PAYOUTS),
+    PolicyBot(V4_FEATURES) (no ICM, so no dependence on payouts),
     bot.pushfold.PushFoldBot (same strategy, no tracker), then
     bot.baseline.BaselineBot.
     """
     return SafeBot(PolicyBot())
 
 
-def legal_actions(to_call: int, stack: int, min_raise_to: int, max_raise_to: int,
-                  can_raise: bool = True) -> LegalActions:
-    """Build consistent LegalActions from the numbers most kits expose.
+def _warm_up() -> None:
+    """Import, build every table and run one decision now, so the first real call
+    doesn't pay for cold caches (importing has its own startup allowance)."""
+    from types import SimpleNamespace as NS
 
-    `to_call` is the chips still needed to call, `stack` the chips behind,
-    and the raise bounds are "raise to" totals for this street.
-    """
-    facing = to_call > 0
-    raise_ok = can_raise and stack > to_call and max_raise_to > 0
-    lo = min(min_raise_to, max_raise_to) if raise_ok else 0
-    hi = max_raise_to if raise_ok else 0
-    return LegalActions(facing, not facing, facing, min(to_call, stack), raise_ok, lo, hi)
-
-
-def to_card(kit_card) -> int:
-    """PLACEHOLDER(kit): assumes cards like "As"/"Td"; adjust to the kit's format."""
-    return card_from_str(str(kit_card))
-
-
-def to_game_state(observation) -> GameState:
-    """PLACEHOLDER(kit): map the kit's observation into our GameState."""
-    raise NotImplementedError("map the kit observation into bot.state.GameState")
+    legal = (NS(kind="fold", min_amount=0, max_amount=0), NS(kind="call", min_amount=20, max_amount=20),
+             NS(kind="raise", min_amount=40, max_amount=2000))
+    seats = tuple(NS(seat=i, stack=2000 - (10 if i == 1 else 20 if i == 2 else 0),
+                     bet=10 if i == 1 else 20 if i == 2 else 0, status="active") for i in range(8))
+    events = (NS(kind="hand", seat=None, amount=1, cards=()), NS(kind="blind", seat=1, amount=10, cards=()),
+              NS(kind="blind", seat=2, amount=20, cards=()))
+    state = NS(seat=3, cards=("As", "Ad"), board=(), pot=30, to_call=20, legal_actions=legal, seats=seats,
+               button=0, blinds=(10, 20), hand_number=1, players_remaining=8, events=events,
+               phase="betting", config=NS(starting_stack=2000, payouts=PAYOUTS),
+               can=lambda k: next((a for a in legal if a.kind == k), None))
+    try:
+        decide(state, b"")
+    except Exception:
+        pass
 
 
-def to_hand_result(kit_result) -> HandResult:
-    """PLACEHOLDER(kit): map the kit's end-of-hand report (stacks, shown cards, the
-    hand's actions) into a HandResult. Leave `actions` empty if it has none."""
-    raise NotImplementedError("map the kit's hand report into bot.state.HandResult")
-
-
-def to_kit_action(action: Action, observation):
-    """PLACEHOLDER(kit): turn our Action into whatever the kit expects back."""
-    kind = action.kind
-    if kind in (FOLD, CHECK, CALL):
-        raise NotImplementedError(f"map {kind} to the kit's action")
-    if kind == RAISE:
-        raise NotImplementedError("map a raise-to total to the kit's raise action")
-    raise ValueError(kind)
-
-
-class Agent:
-    """PLACEHOLDER(kit): match the class name and method signatures of the kit's template.
-
-    If anything in here raises, the tournament checks/folds for us, which is
-    the same thing our own fallback would do, so no extra guard is needed.
-    """
-
-    def __init__(self):
-        self.bot = build_bot()
-
-    def new_table(self, seat: int, num_seats: int) -> None:
-        self.bot.new_table(seat, num_seats)
-
-    def hand_over(self, kit_result) -> None:
-        """PLACEHOLDER(kit): wire to the kit's end-of-hand hook, if it has one."""
-        self.bot.hand_over(to_hand_result(kit_result))
-
-    def act(self, observation):
-        return to_kit_action(self.bot.act(to_game_state(observation)), observation)
-
-
+_warm_up()
 # Freeze everything loaded so far so a full GC can't land inside a decision.
 tune_gc()

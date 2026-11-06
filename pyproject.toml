@@ -20,7 +20,7 @@ include = ["bot*", "engine*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-pythonpath = ["."]
+pythonpath = [".", "kitsim"]
 addopts = "-m 'not slow'"
 markers = [
     "slow: large fuzz and latency runs (run with -m slow)",

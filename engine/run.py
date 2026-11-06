@@ -40,9 +40,17 @@ def _policy(features=None, omaha_features=None, ranks=None):
         PolicyBot(features, payouts=config.payouts, omaha_features=omaha_features, ranks=ranks))
 
 
+def _kit_seat(config):
+    from engine.kit_bridge import KitSeat  # puts the stand-in SDK on the path first
+    import adapter
+
+    return KitSeat(adapter.Agent, config)
+
+
 # Every factory takes (seed, table config) and returns a fresh bot.
 BOTS = {
-    "ours": _policy(),  # what adapter.build_bot() submits
+    "ours": _policy(),  # the strategy adapter.Agent plays, called directly
+    "kit": lambda seed, config: _kit_seat(config),  # the same, through the kit protocol and memory
     "ours_chen": _policy(ranks=CHEN),  # the same, ignoring any generated hand-rank table
     "v5": _policy(V5_FEATURES, omaha_features=V4_FEATURES),
     "v4": _policy(V4_FEATURES),
