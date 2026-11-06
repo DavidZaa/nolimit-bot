@@ -14,6 +14,8 @@ payouts differ: everything is measured relative to the last open place, so
 
 from __future__ import annotations
 
+from functools import lru_cache
+
 # Points by finishing place, 1st first. PLACEHOLDER(kit): set from the announced points.
 PAYOUTS = (50.0, 30.0, 20.0, 0.0, 0.0, 0.0, 0.0, 0.0)
 # Below 1 is real (a big stack calling a short one on the bubble gains from
@@ -102,3 +104,10 @@ def bubble_factor(totals, me: int, opp: int, payouts=PAYOUTS) -> float:
     if gain <= 0:
         return MAX_BUBBLE_FACTOR
     return min(MAX_BUBBLE_FACTOR, max(MIN_BUBBLE_FACTOR, loss / gain))
+
+
+@lru_cache(maxsize=4096)
+def cached_bubble_factor(totals: tuple, me: int, opp: int, payouts: tuple) -> float:
+    """bubble_factor memoised on (stacks, seats, payouts). Tables can draw their own
+    payouts, so the payouts are part of the key; losing the cache only costs time."""
+    return bubble_factor(totals, me, opp, payouts)

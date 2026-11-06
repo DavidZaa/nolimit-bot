@@ -25,7 +25,7 @@ and the preflop ranking only sees the best two of the four cards.
 from __future__ import annotations
 
 from bot.hands import TOP_PAIR, WEAK_PAIR
-from bot.icm import PAYOUTS, bubble_factor
+from bot.icm import PAYOUTS, cached_bubble_factor
 from bot.preflop import ACTIVE
 from bot.pushfold import PushFoldBot, _last_raiser, seats_behind
 from bot.tracker import PRIORS, Tracker, start_stacks
@@ -68,8 +68,6 @@ class PolicyBot(PushFoldBot):
         self.payouts = tuple(payouts)
         self.call_power, self.shove_power = icm_powers
         self.tracker = Tracker()
-        self._bubble_hand = None
-        self._bubbles: dict[int, float] = {}
 
     def new_table(self, seat: int, num_seats: int) -> None:
         self.tracker.new_table(seat, num_seats)
@@ -113,13 +111,8 @@ class PolicyBot(PushFoldBot):
 
     def _bubble(self, state, opp: int) -> float:
         """Bubble factor for an all-in against `opp`. Everyone's chips are fixed for
-        the length of a hand, so it's worked out once per opponent per hand."""
-        if state.hand_number != self._bubble_hand:
-            self._bubble_hand, self._bubbles = state.hand_number, {}
-        bf = self._bubbles.get(opp)
-        if bf is None:
-            bf = self._bubbles[opp] = bubble_factor(start_stacks(state), state.seat, opp, self.payouts)
-        return bf
+        the length of a hand, so it's computed once per hand and opponent."""
+        return cached_bubble_factor(tuple(start_stacks(state)), state.seat, opp, self.payouts)
 
     def _call_tightness(self, state, raiser):
         if "icm" not in self.active or raiser is None:
