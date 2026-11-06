@@ -212,11 +212,11 @@ def add_table_args(p: argparse.ArgumentParser) -> None:
     p.add_argument("--lineup", default="baseline:4,random:2,station,maniac")
     p.add_argument("--variant", type=parse_variant, default=NLHE, help=VARIANT_SPEC_HELP)
     p.add_argument("--schedule", default="doubling", help=SCHEDULE_SPEC_HELP)
-    p.add_argument("--hands-per-level", type=int, default=25)
+    p.add_argument("--hands-per-level", type=int, default=20)
     p.add_argument("--stack", type=int, default=2000, help="starting stack")
     p.add_argument("--payouts", default=",".join(f"{x:g}" for x in PLACEHOLDER_PAYOUTS),
                    help="points by finishing place, 1st first (default: PAYOUTS in bot/icm.py)")
-    p.add_argument("--max-hands", type=int, default=200)
+    p.add_argument("--max-hands", type=int, default=250)
     p.add_argument("--no-enforce-time", action="store_true",
                    help="don't auto-fold decisions that take more than 1 ms of CPU")
 

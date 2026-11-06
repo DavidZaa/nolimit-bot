@@ -105,14 +105,15 @@ def parse_variant(spec: str) -> Variant:
 @dataclass(frozen=True)
 class BlindSchedule:
     levels: tuple[tuple[int, int, int], ...]  # (small blind, big blind, ante) per level
-    hands_per_level: int = 25
+    hands_per_level: int = 20  # the published default
 
     def level_for(self, hand_number: int) -> tuple[int, int, int]:
         i = (hand_number - 1) // self.hands_per_level
         return self.levels[min(i, len(self.levels) - 1)]
 
 
-# PLACEHOLDER(kit): only "start 10/20, up every 25 hands" is published. These two
+# Published defaults: start 10/20, up every 20 hands, 250-hand cap. The level
+# sizes aren't published (PLACEHOLDER(kit): state.config has them). These two
 # bracket the plausible range so strategy gets tuned against both.
 DOUBLING = BlindSchedule(tuple((10 * 2**i, 20 * 2**i, 0) for i in range(8)))
 X1_5 = BlindSchedule(tuple((bb // 2, bb, 0) for bb in (20, 30, 50, 70, 100, 150, 230, 350)))
@@ -149,7 +150,7 @@ def parse_schedule(spec: str, hands_per_level: int | None = None) -> BlindSchedu
             big = int(round(bb * growth**i))
             levels.append((big // 2, big, int(round(big * ante))))
         levels = tuple(levels)
-    return BlindSchedule(levels, hands_per_level or 25)
+    return BlindSchedule(levels, hands_per_level or 20)
 
 # Points by finishing place. One setting, in bot/icm.py, so the simulator
 # always scores by the same points the bot plays for.
@@ -163,7 +164,7 @@ class TableConfig:
     payouts: tuple[float, ...] = PLACEHOLDER_PAYOUTS
     seats: int = 8
     starting_stack: int = 2000
-    max_hands: int = 200
+    max_hands: int = 250  # the published hand cap
     time_limit_ns: int = 1_000_000  # the official 1 ms per decision
     enforce_time: bool = True  # treat slow decisions exactly like the tournament does
 
