@@ -4,6 +4,7 @@ import random
 
 import pytest
 
+from bot.baseline import preflop_percentile
 from bot.hands import MONSTER, NOTHING, TOP_PAIR, TWO_PAIR_PLUS, WEAK_PAIR, made_hand, strong_draw
 from bot.pushfold import PushFoldBot
 from bot.state import CALL, CHECK, FOLD, RAISE, Action, card_to_str, cards_from_str
@@ -160,18 +161,24 @@ def test_omaha_draws_use_exactly_two_hole_cards(hole, board, draw):
 
 # -- the three-card discard variant ---------------------------------------------------------
 
-def test_three_card_strength_is_the_best_two_plus_a_small_bonus():
-    from bot.baseline import preflop_percentile
-    from bot.preflop import CHEN, THREE_CONNECTED_BONUS, THREE_SUITED_BONUS
+def test_three_card_strength_is_the_best_two_plus_a_small_bonus_ranked_among_three_card_hands():
+    from bot.preflop import CHEN, THREE_CONNECTED_BONUS, THREE_SUITED_BONUS, three_card_score
 
     p = lambda s: CHEN.percentile(cards_from_str(s))  # noqa: E731
-    assert p("AsAd7c") == preflop_percentile(cards_from_str("AsAd"))  # no bonus: AA plus junk
+    score = lambda s: three_card_score(cards_from_str(s))  # noqa: E731
+    assert score("AsAd7c") == preflop_percentile(cards_from_str("AsAd"))  # best two, no bonus
+    assert score("9h8h3h") == pytest.approx(preflop_percentile(cards_from_str("9h8h")) * (1 - THREE_SUITED_BONUS))
+    assert score("9c8dTh") == pytest.approx(min(preflop_percentile(cards_from_str(x)) for x in ("9c8d", "9cTh", "8dTh"))
+                                            * (1 - THREE_CONNECTED_BONUS))
+    # As a percentile, it's a share of three-card hands: about as many below 10% as there should be.
     assert p("AsAd7c") < p("KsKd7c") < p("9c5d2h")
-    suited = p("9h8h3h")
-    assert suited == pytest.approx(preflop_percentile(cards_from_str("9h8h")) * (1 - THREE_SUITED_BONUS))
-    connected = p("9c8dTh")
-    assert connected == pytest.approx(min(preflop_percentile(cards_from_str(x)) for x in ("9c8d", "9cTh", "8dTh"))
-                                      * (1 - THREE_CONNECTED_BONUS))
+    import random
+    rng = random.Random(1)
+    hands = [rng.sample(range(52), 3) for _ in range(4000)]
+    below = sum(CHEN.percentile(h) <= 0.10 for h in hands) / len(hands)
+    assert 0.08 < below < 0.12
+    # ...whereas on the two-card scale far more than 10% of three-card hands look like top-10% hands.
+    assert sum(three_card_score(h) <= 0.10 for h in hands) / len(hands) > 0.2
 
 
 def test_discard_rules_shrink_the_all_in_calling_range():

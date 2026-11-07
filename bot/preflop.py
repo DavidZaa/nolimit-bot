@@ -25,7 +25,7 @@ five-card hands so the result is still a share of five-card hands.
 
 from __future__ import annotations
 
-from bisect import bisect_left
+from bisect import bisect_left, bisect_right
 from functools import lru_cache
 from importlib import import_module
 from itertools import combinations
@@ -40,8 +40,9 @@ THREE_SUITED_BONUS = 0.15  # percentile shrinks by this share when all three are
 THREE_CONNECTED_BONUS = 0.10  # ... when the three ranks are distinct and within a 3-rank span (e.g. 9-T-J)
 
 
-def three_card_percentile(hole) -> float:
-    """Share of two-card hands at least as good as the best two of these three, less a bonus."""
+def three_card_score(hole) -> float:
+    """The best two of these three on the two-card (Chen) scale, less the suited/connected bonus.
+    Lower is better. Not yet a percentile of three-card hands: see three_card_percentile."""
     best = min(chen_percentile(pair) for pair in combinations(hole, 2))
     ranks = sorted({c >> 2 for c in hole})
     bonus = 0.0
@@ -50,6 +51,25 @@ def three_card_percentile(hole) -> float:
     if len(ranks) == 3 and ranks[-1] - ranks[0] <= 2:
         bonus += THREE_CONNECTED_BONUS
     return best * (1 - bonus)
+
+
+@lru_cache(maxsize=1)
+def _three_card_scores() -> list[float]:
+    """three_card_score of every three-card hand from a 52-card deck, sorted (22,100 of them)."""
+    return sorted(three_card_score(h) for h in combinations(range(52), 3))
+
+
+def three_card_percentile(hole) -> float:
+    """Share of three-card starting hands at least this good.
+
+    The best two of three are much stronger than two random cards (a pair turns up about
+    three times as often), so a two-card percentile would make every range tuned for two-card
+    hands play far too loose. Ranking against all three-card hands keeps "top 10%" meaning
+    the top 10% of the hands actually dealt. Built once (~70 ms), at import via the warm-up.
+    """
+    scores = _three_card_scores()
+    score = three_card_score(hole)
+    return (bisect_left(scores, score) + bisect_right(scores, score)) / (2 * len(scores))
 
 
 def hand_class(hole) -> tuple[tuple[int, ...], ...]:

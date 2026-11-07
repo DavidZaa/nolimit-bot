@@ -207,7 +207,8 @@ def official(out: Path, kit: Path | None, tables: int) -> dict:
         say("PENDING: --kit not given, so poker-agent play against the kit's examples wasn't run")
         results["play"] = {"status": "pending", "reason": "no --kit"}
         return results
-    examples = [str(kit / "examples" / e) for e in ("check_or_fold", "min_raiser")]
+    examples = [str(kit.resolve() / "examples" / e) for e in ("check_or_fold", "min_raiser")]
+    out = out.resolve()  # play runs from the kit's folder
     run = subprocess.run([tool, "play", str(out), str(out), str(out), str(out), *examples, *examples,
                           "--tables", str(tables)], capture_output=True, text=True, cwd=kit)
     results["play"] = {"returncode": run.returncode, "stdout": run.stdout[-4000:], "stderr": run.stderr[-4000:]}
