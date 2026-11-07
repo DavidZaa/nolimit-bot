@@ -185,6 +185,10 @@ class PolicyBot(PushFoldBot):
                 and self._my_exposed_pairs_board(state) and (strength >= WEAK_PAIR
                                                              or strong_draw(state.hole, state.board, state.rules))):
             return state.pot // 2  # our exposed card pairs the flop: the field folds 66% to this bet
+        if (flag("turn_barrel", "off") == "on" and state.street == 2 and heads_up
+                and self._my_exposed_pairs_board(state) and _last_raiser(state, 1) == state.seat
+                and (strength >= WEAK_PAIR or strong_draw(state.hole, state.board, state.rules))):
+            return state.pot // 2  # our exposed-pair flop bet got called: keep betting heads-up
         if (flag("late_streets", "off") == "on" and state.street == 1 and strength < TOP_PAIR
                 and not strong_draw(state.hole, state.board, state.rules)
                 and (len(others) >= 2 or self._strong_visible(state))):
@@ -255,6 +259,10 @@ class PolicyBot(PushFoldBot):
             return check_or(legal, call=False)
         small = legal.call_amount * 3 <= state.pot - legal.call_amount
         return check_or(legal, call=two_pair_plus_hole or (s.bucket == TOP_PAIR and small))
+
+    def _maniac(self, seat):
+        st = self.tracker._seat(seat)
+        return st.hands >= 10 and st.shoves / st.hands >= 0.40
 
     def _fold_to_reraise(self, seat):
         st = self.tracker._seat(seat)

@@ -211,6 +211,10 @@ class PushFoldBot:
             return commit(legal)
 
         pre_raises = [r.seat for r in state.actions if r.street == 0 and r.kind == RAISE]
+        if (getattr(state.rules, "discards", 0) and flag("maniac_calls", "off") == "on" and pre_raises
+                and highest >= state.stacks[pre_raises[-1]] + state.bets[pre_raises[-1]]  # their all-in
+                and self._maniac(pre_raises[-1])):
+            return commit(legal) if pct <= 0.45 else check_or(legal, call=False)  # a known shover: call wide
         if (getattr(state.rules, "discards", 0) and flag("bb_defense", "off") == "on" and seat == state.bb_seat
                 and len(pre_raises) == 1 and pre_raises[0] in (state.button, state.sb_seat)
                 and highest <= 3.5 * bb and highest < state.stacks[pre_raises[0]] + state.bets[pre_raises[0]]
@@ -369,6 +373,9 @@ class PushFoldBot:
 
     def _fold_to_reraise(self, seat: int) -> float:
         return 0.73  # the policy reads its tracker
+
+    def _maniac(self, seat: int) -> bool:
+        return False  # the policy reads its tracker
 
     def _single_raise(self, state):
         """The seat of the only preflop raise so far if nobody is in with it yet, else None."""
