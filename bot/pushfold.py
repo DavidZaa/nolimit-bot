@@ -57,14 +57,14 @@ CAL_EARLY_3BET, CAL_EARLY_CALL = 0.025, 0.10  # vs an earlier raise
 CAL_CALL_STACK = 0.10
 # cal_tuned (build flag): opens measured under target with CAL_OPEN, and folds to a raise
 # well under it, so wider open shares and narrower call shares.
-TUNED_OPEN = {"button": 0.65, "cutoff": 0.45, "sb": 0.70}
+TUNED_OPEN = {"button": 0.75, "cutoff": 0.50, "sb": 0.75}  # field folds ~78% to steals
 TUNED_LATE_CALL, TUNED_EARLY_CALL, TUNED_EARLY_3BET = 0.25, 0.10, 0.025  # early raisers: unchanged
 TUNED_CALL_STACK, TUNED_CALL_BB, TUNED_SB_STEAL_BB = 0.15, 4, 40  # no any-two SB steal at 40+ BB
 # resteal (build flag): late openers fold to re-raises 73% of the time (real data). Facing one
 # non-all-in late raise: re-raise 3x with the top RESTEAL_TOP over 25 BB, re-shove it at
 # 15-25 BB; only the top RESTEAL_STICKY vs a seat folding under 55% to re-raises (5+ seen);
 # continue against a 4-bet only with the top RESTEAL_4BET.
-RESTEAL_TOP, RESTEAL_STICKY, RESTEAL_4BET = 0.25, 0.10, 0.05
+RESTEAL_TOP, RESTEAL_STICKY, RESTEAL_4BET = 0.40, 0.10, 0.05  # field folds 73% to re-raises
 FIGHT_BB, FIGHT_SHARE = 30, 0.40
 # deep (build flag): 40+ BB effective, see more flops: wider middle/late opens, and calls of
 # small opens in position and from the big blind. closer (build flag): 3-5 left as the chip
