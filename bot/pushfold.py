@@ -48,6 +48,13 @@ SHORT_HANDED_PLAYERS = 2
 LATE_FULL_PLAYERS = 5
 LATE_BUTTON_WIDEN, LATE_SB_WIDEN = 1.5, 1.3
 LATE_3BET, LATE_CALL, LATE_CALL_STACK, LATE_SHOVE_BB = 0.08, 0.15, 0.10, 25
+# calibrated (build flag), from the top teams' round data, discard variants with 5+ left:
+# first-in opens by position (non-all-in only; shove depth keeps the tight ranges), and
+# facing one non-all-in raise, re-raise/call shares by the raiser's position.
+CAL_OPEN = {"button": 0.60, "cutoff": 0.45, "sb": 0.70}
+CAL_LATE_3BET, CAL_LATE_CALL = 0.08, 0.25  # vs a cutoff/button/small-blind raise
+CAL_EARLY_3BET, CAL_EARLY_CALL = 0.025, 0.10  # vs an earlier raise
+CAL_CALL_STACK = 0.10
 HU_DEPTH_BB = 20
 HU_OPEN, HU_CALL = 0.70, 0.40
 DEEP_CALL = 0.08  # top share that flats a cheap raise when deep
@@ -102,6 +109,11 @@ class PushFoldBot:
         heads_up = short and state.players_left == 2 and depth <= HU_DEPTH_BB
         late = (getattr(state.rules, "discards", 0) and flag("late_position", "off") == "on"
                 and state.players_left >= LATE_FULL_PLAYERS)
+        calibrated = (getattr(state.rules, "discards", 0) and flag("calibrated", "off") == "on"
+                      and state.players_left >= LATE_FULL_PLAYERS)
+        n = len(state.stacks)
+        cutoff = next((s for i in range(1, n) for s in [(state.button - i) % n]
+                       if state.in_hand[s] or state.stacks[s] > 0), None)
 
         if highest <= bb:
             if heads_up and seat == state.sb_seat:
@@ -118,6 +130,13 @@ class PushFoldBot:
                 if pct <= shove_range(depth, len(behind)) * widen / self._shove_tightness(state, behind):
                     return commit(legal)
                 return check_or(legal, call=False)
+            if calibrated:
+                position = "button" if seat == state.button else "sb" if seat == state.sb_seat else (
+                    "cutoff" if seat == cutoff else None)
+                if position is not None:
+                    if pct <= CAL_OPEN[position] or widen == float("inf"):
+                        return raise_to(legal, OPEN_TO_BB * bb)
+                    return check_or(legal, call=False)
             if pct <= 0.45 / max(len(behind), 1) ** 0.8 * widen:
                 return raise_to(legal, OPEN_TO_BB * bb)
             return check_or(legal, call=False)
@@ -130,6 +149,16 @@ class PushFoldBot:
             too_deep = True  # no re-shove either
         if pct <= self._resteal_range(state, depth) and not too_deep:
             return commit(legal)
+
+        if calibrated and self._single_raise(state) is not None:
+            raiser = self._single_raise(state)
+            from_late = raiser in (state.button, state.sb_seat, cutoff)
+            three_bet, call_share = (CAL_LATE_3BET, CAL_LATE_CALL) if from_late else (CAL_EARLY_3BET, CAL_EARLY_CALL)
+            if pct <= three_bet:
+                return commit(legal) if depth <= LATE_SHOVE_BB else raise_to(legal, 3 * highest)
+            if pct <= call_share and legal.call_amount <= CAL_CALL_STACK * (state.stacks[seat] + state.bets[seat]):
+                return Action(CALL) if legal.can_call else check_or(legal, call=False)
+            return check_or(legal, call=False)
 
         if late and self._single_late_raise(state):
             if pct <= LATE_3BET:
@@ -209,14 +238,17 @@ class PushFoldBot:
         """Share of hands to re-shove over a raise as a resteal, on top of the usual ranges."""
         return 0.0
 
-    def _single_late_raise(self, state) -> bool:
-        """Exactly one preflop raise so far, nobody in with it, from the cutoff, button or small blind."""
+    def _single_raise(self, state):
+        """The seat of the only preflop raise so far if nobody is in with it yet, else None."""
         raises = [r for r in state.actions if r.street == 0 and r.kind == RAISE]
         calls = [r for r in state.actions if r.street == 0 and r.kind == CALL]
-        if len(raises) != 1 or calls:
-            return False
+        return raises[0].seat if len(raises) == 1 and not calls else None
+
+    def _single_late_raise(self, state) -> bool:
+        """Exactly one preflop raise so far, nobody in with it, from the cutoff, button or small blind."""
+        raiser = self._single_raise(state)
         n = len(state.stacks)
-        return raises[0].seat in (state.button, state.sb_seat, (state.button - 1) % n)
+        return raiser is not None and raiser in (state.button, state.sb_seat, (state.button - 1) % n)
 
     def _fold_marginal(self, state) -> bool:
         """Facing a bet with less than two pair: give it up (an opponent's visible hand is strong)."""

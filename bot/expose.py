@@ -17,6 +17,7 @@ from __future__ import annotations
 from collections import Counter
 
 from bot.discard import default_rules
+from bot.flags import flag
 from bot.hands import TOP_PAIR, hand_strength
 from bot.hands import _straights as straights
 
@@ -53,6 +54,13 @@ def choose_expose(kept, board, rules=None) -> int:
     if len(kept) == 1:
         return kept[0]
     strength = hand_strength(kept, board, rules)
+    if flag("calibrated", "off") == "on":
+        # The field's habit, measured: show the lower card unless it's the one making our hand.
+        low, high = sorted(kept, key=lambda c: (c >> 2, c))
+        made = strength is not None and strength.bucket >= TOP_PAIR
+        if made and contribution(low, high, board, rules) > contribution(high, low, board, rules):
+            return high
+        return low
     if strength is not None and strength.bucket >= TOP_PAIR:
         a, b = kept[0], kept[1]
         return min(kept, key=lambda c: (contribution(c, b if c == a else a, board, rules), c >> 2, c))

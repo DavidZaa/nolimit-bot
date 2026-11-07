@@ -43,6 +43,10 @@ def build(spec: str, base: Path, work: Path) -> tuple[str, Path]:
     return name, target
 
 
+opens: dict = {}  # label -> non-all-in first-in open sizes in big blinds
+positions: dict = {}  # label -> position -> [hands there, first-in raises there]
+
+
 def table_points(history: Path, styles: dict | None = None) -> list[dict]:
     """Per table: {seat label: final points}. With `styles`, also counts per label prefix:
     hands dealt, VPIP (a preflop call or raise) and shoves (the kit's prize_the_shover events)."""
@@ -59,6 +63,15 @@ def table_points(history: Path, styles: dict | None = None) -> list[dict]:
             for hand in rec["hands"]:
                 preflop, vpip, shoves = True, set(), set()
                 raised, first_in, faced, folded_to = False, set(), set(), set()
+                alive = [i for i in range(len(seats)) if hand["stacks_before"][i] > 0]
+                button = hand["button"]
+                after = [i for i in alive if i > button] + [i for i in alive if i < button]  # after the button
+                pos = {}
+                if len(alive) >= 4:
+                    pos[after[-1]] = "cutoff"
+                    pos[button] = "button"
+                    pos[after[0]] = "sb"
+                bb_size = hand["blinds"][1] or 1
                 for ev in hand["events"]:
                     kind, seat = ev.get("kind"), ev.get("seat")
                     if kind == "board":
@@ -68,6 +81,8 @@ def table_points(history: Path, styles: dict | None = None) -> list[dict]:
                         if kind == "raise":
                             if not raised and seat not in vpip - {seat}:
                                 first_in.add(seat)
+                                if ev.get("amount", 0) < hand["stacks_before"][seat]:
+                                    opens.setdefault(seats[seat].split("#")[0], []).append(ev["amount"] / bb_size)
                             raised = True
                     elif preflop and kind == "fold" and seat is not None and raised:
                         faced.add(seat)
@@ -85,6 +100,11 @@ def table_points(history: Path, styles: dict | None = None) -> list[dict]:
                         st[4] += i in first_in
                         st[5] += i in faced
                         st[6] += i in folded_to
+                        if i in pos:
+                            by = positions.setdefault(label.split("#")[0], {})
+                            k = by.setdefault(pos[i], [0, 0])
+                            k[0] += 1
+                            k[1] += i in first_in
             # Places: survivors by final chips, busted seats by how long they lasted.
             hands = rec["hands"]
             bust_hand = {}
@@ -162,9 +182,14 @@ def main(argv=None) -> int:
         print(f"seed {seed}: {len(tables)} tables | {a} {sum(a_pts) / len(a_pts):6.2f}  {b} "
               f"{sum(b_pts) / len(b_pts):6.2f} | {a} - {b} = {m:+.2f} ± {ci:.2f} (95%) | "
               f"failed decisions: {failed or 0}")
-        for name, (hands, vpip, shoves, (p1, p2, p3, cash, n), opens, faced, folds) in sorted(styles.items()):
+        for name, (hands, vpip, shoves, (p1, p2, p3, cash, n), opens_, faced, folds) in sorted(styles.items()):
+            by = positions.get(name, {})
+            where = "  ".join(f"{k} open {100 * v[1] / max(1, v[0]):4.1f}%" for k, v in sorted(by.items()))
+            sizes = opens.get(name, [])
+            size = f"open size {sum(sizes) / len(sizes):.1f} BB" if sizes else ""
             print(f"    {name:14} VPIP {100 * vpip / hands:5.1f}%  shove {100 * shoves / hands:4.1f}%  "
-                  f"first-in raise {100 * opens / hands:4.1f}%  fold-to-raise {100 * folds / max(1, faced):4.1f}%  "
+                  f"first-in raise {100 * opens_ / hands:4.1f}%  fold-to-raise {100 * folds / max(1, faced):4.1f}%  "
+                  f"{where}  {size}\n{' ' * 19}"
                   f"1st {100 * p1 / n:4.1f}%  2nd {100 * p2 / n:4.1f}%  3rd {100 * p3 / n:4.1f}%  "
                   f"cash {100 * cash / n:4.1f}%  HU win {100 * p1 / max(1, p1 + p2):4.1f}%  ({n} seat-tables)")
     m, ci = mean_ci(pooled)

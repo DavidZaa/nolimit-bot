@@ -53,6 +53,7 @@ V6_FEATURES = V5_FEATURES + ("defend",)  # candidate, not submitted until it cle
 DEFAULT_FEATURES, DEFAULT_OMAHA_FEATURES = V5_FEATURES, V4_FEATURES
 
 STEAL_ANY_TWO = 0.9  # P(everyone behind folds) at which any two cards steal
+CAL_STEAL_ANY_TWO = 0.7  # ... from the button or small blind with the calibrated flag
 ANY_TWO = float("inf")  # a range multiplier every hand clears
 MAX_WIDEN, MIN_WIDEN = 3.0, 0.5
 STICKY = 0.25  # fold-to-bet below this: value-bet thin and big, never bluff
@@ -128,7 +129,11 @@ class PolicyBot(PushFoldBot):
         p_all_fold = 1.0
         for s in everyone:
             p_all_fold *= 1.0 if tracker.inactive(s) else tracker.fold_to_steal(s)
-        if p_all_fold >= STEAL_ANY_TWO:
+        any_two = STEAL_ANY_TWO
+        if (flag("calibrated", "off") == "on" and getattr(state.rules, "discards", 0)
+                and state.seat in (state.button, state.sb_seat)):
+            any_two = CAL_STEAL_ANY_TWO  # the field folds 80% to late opens: steal any two sooner
+        if p_all_fold >= any_two:
             return ANY_TWO
         assumed = PRIORS["fold_to_steal"] ** len(everyone)
         return min(MAX_WIDEN, max(MIN_WIDEN, p_all_fold / assumed))
