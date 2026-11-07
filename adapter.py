@@ -20,10 +20,19 @@ each is a PLACEHOLDER(kit) until checked against the real SDK):
   3. pytest -q; then scripts/pack.sh --variant <ID>, which runs the kit's own
      `poker-agent check`, and a `poker-agent play` against its examples.
 
-Rules are never guessed. If the config names a variant with no registered
-rules, or a tournament setting is missing or malformed, the decision checks
-or folds (a legal action, not a failed decision) and the process prints one
-RULES ERROR line to stderr, which `poker-agent play` shows locally.
+Rules degrade gracefully (bot.rules.rules_from_state). A registered variant
+with a complete config plays its exact rules. Anything else plays the best
+rules the config and the state allow: an unknown variant ID PLO-style with 4+
+hole cards (else hold'em-style, pot-limit if the max raise is below the
+all-in), bad payouts as 50/30/20 over the seats, a bad blinds schedule, level
+length or hand cap as the current blinds, 20 and 250, missing players as the
+seats at the table; each guess prints one RULES WARNING line to stderr. Only
+if even that is impossible does it check or fold (RULES ERROR). The
+tournament never shows stderr, so a silent check/fold bot would look healthy
+while scoring nothing; that's why guessing beats failing closed here.
+
+NLB_STRICT=1 restores fail-closed (any guess is a RULES ERROR and a
+check/fold), so local checks and scripts/pack.sh catch config problems.
 """
 
 from __future__ import annotations
@@ -39,7 +48,7 @@ import poker_agent_sdk as sdk  # noqa: E402
 from bot.events import TableLog  # noqa: E402
 from bot.handeval import warm as warm_evaluator  # noqa: E402
 from bot.policy import PolicyBot  # noqa: E402
-from bot.rules import VARIANTS, RulesError, rules_from_config  # noqa: E402
+from bot.rules import VARIANTS, RulesError, rules_from_config, rules_from_state  # noqa: E402
 from bot.runtime import tune_gc  # noqa: E402
 from bot.safety import SafeBot  # noqa: E402
 from bot.state import (  # noqa: E402
@@ -218,7 +227,9 @@ def decide(state, memory: bytes):
         if getattr(state, "phase", "betting") != "betting" or not any(
                 state.can(k) for k in ("fold", "check", "call", "raise")):
             return automatic(state), new_memory
-        rules = rules_from_config(cfg)
+        rules, warnings = rules_from_state(state)
+        for warning in warnings:
+            _report_once(f"RULES WARNING (playing on a guess): {warning}")
         policy = PolicyBot()
         policy.tracker = tracker
         action = SafeBot(policy).act(to_game_state(state, log, index, rules))

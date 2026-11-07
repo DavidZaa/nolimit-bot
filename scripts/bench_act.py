@@ -14,8 +14,9 @@ Reported: the sample size; p50, p99, p99.9 and max of wall time
 (perf_counter_ns) and thread CPU time, with distribution-free 95% intervals
 for the tail percentiles; calls over the decision limit; tables where a seat
 would have drained the per-table time bank; the largest memory returned;
-and every exception, illegal action, SafeBot fallback and RULES ERROR.
---strict exits non-zero on any of those, or on a drained bank.
+and every exception, illegal action and RULES ERROR/WARNING line.
+--strict sets NLB_STRICT=1 (rules fail closed) and exits non-zero on any of those,
+or on a drained bank.
 
 Wall time on a busy laptop includes OS pauses that CPU time doesn't; run it
 on the build box for numbers that mean anything about production, and even
@@ -98,6 +99,8 @@ def main(argv=None) -> int:
     p.add_argument("--strict", action="store_true", help="exit 1 on any failure or drained bank")
     args = p.parse_args(argv)
 
+    if args.strict:
+        os.environ["NLB_STRICT"] = "1"  # any guessed rule is a failure here, not a warning
     if args.agent_dir:
         sys.path.insert(0, os.path.abspath(args.agent_dir))
     sys.path.insert(1 if args.agent_dir else 0, ROOT)

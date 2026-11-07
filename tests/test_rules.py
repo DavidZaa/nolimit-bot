@@ -125,24 +125,100 @@ def test_missing_malformed_or_unknown_rules_are_refused(change):
 
 
 @pytest.mark.parametrize("change", BAD_CONFIGS.values(), ids=BAD_CONFIGS.keys())
-def test_the_agent_never_plays_a_default_strategy_on_bad_rules(change, capsys):
-    # Aces facing a raise: the strategy re-raises. On refused rules the agent must take
-    # the safe legal action (fold here: check isn't offered), not play hold'em by default.
-    good = kit_state(GOOD)
-    assert decide(good, b"")[0].kind == "raise"
+def test_strict_mode_fails_closed_on_bad_rules(change, monkeypatch):
+    # NLB_STRICT=1 (pack.sh, local checks): refuse, and take the safe legal action.
+    monkeypatch.setenv("NLB_STRICT", "1")
+    with pytest.raises(R.RulesError):
+        R.rules_from_state(kit_state(replace(GOOD, **change)))
     action, memory = decide(kit_state(replace(GOOD, **change)), b"")
-    assert action == sdk.Action.fold()
-    assert memory  # the events were still read into memory
-    assert "RULES ERROR" in capsys.readouterr().err or True  # printed once per process, maybe earlier
+    assert action == sdk.Action.fold() and memory
 
 
-def test_a_rules_error_is_reported_on_stderr_once(capsys):
+@pytest.mark.parametrize("change", BAD_CONFIGS.values(), ids=BAD_CONFIGS.keys())
+def test_by_default_bad_rules_still_play_the_strategy(change, monkeypatch):
+    # In the tournament a check/fold bot looks healthy and scores nothing: play on a guess.
+    monkeypatch.delenv("NLB_STRICT", raising=False)
+    good = decide(kit_state(GOOD), b"")[0]
+    assert good.kind == "raise"  # aces facing a raise
+    assert decide(kit_state(replace(GOOD, **change)), b"")[0] == good
+
+
+def test_strict_mode_reports_a_rules_error_once(capsys, monkeypatch):
+    monkeypatch.setenv("NLB_STRICT", "1")
     adapter._reported.clear()
     bad = kit_state(replace(GOOD, variant="unregistered_variant_x"))
     decide(bad, b"")
     decide(bad, b"")
     err = capsys.readouterr().err
     assert err.count("RULES ERROR") == 1 and "unregistered_variant_x" in err
+
+
+def test_each_guess_is_warned_about_once(capsys, monkeypatch):
+    monkeypatch.delenv("NLB_STRICT", raising=False)
+    adapter._reported.clear()
+    bad = kit_state(replace(GOOD, variant="unregistered_variant_y", payouts=None))
+    decide(bad, b"")
+    decide(bad, b"")
+    err = capsys.readouterr().err
+    assert err.count("RULES WARNING") == 2 and "unregistered_variant_y" in err and "50/30/20" in err
+    assert "RULES ERROR" not in err
+
+
+# -- what each guess is ----------------------------------------------------------------------
+
+class Bare:
+    """A config with only the given fields: the rest are simply missing, not None."""
+
+    def __init__(self, **fields):
+        self.__dict__.update(fields)
+
+
+FULL = dict(variant="nlhe", players=8, starting_stack=2000, blinds=((10, 20, 0), (20, 40, 0)),
+            hands_per_level=20, hand_cap=250, payouts=(50, 30, 20, 0, 0, 0, 0, 0))
+
+
+@pytest.mark.parametrize("missing", list(FULL))
+def test_each_missing_field_still_gives_a_normal_strategy_action(missing, monkeypatch):
+    monkeypatch.delenv("NLB_STRICT", raising=False)
+    config = Bare(**{k: v for k, v in FULL.items() if k != missing})
+    rules, warnings = R.rules_from_state(kit_state(config))
+    assert warnings and any(missing in w or (missing == "variant" and "variant" in w) for w in warnings) or (
+        missing == "blinds" and any("blinds" in w for w in warnings))
+    assert decide(kit_state(config), b"")[0].kind == "raise"
+
+
+def test_the_guesses_are_the_documented_defaults(monkeypatch):
+    monkeypatch.delenv("NLB_STRICT", raising=False)
+    rules, _ = R.rules_from_state(kit_state(Bare(variant="nlhe")))
+    assert rules.payouts == (50.0, 30.0, 20.0, 0.0, 0.0, 0.0, 0.0, 0.0)  # 50/30/20 over the 8 seats
+    assert rules.blind_schedule == ((10, 20, 0),)  # the state's current blinds
+    assert (rules.hands_per_level, rules.hand_cap, rules.seats) == (20, 250, 8)
+    six = Bare(**dict(FULL, players=6, payouts="bad"))
+    assert R.rules_from_state(kit_state(six))[0].payouts == (50.0, 30.0, 20.0, 0.0, 0.0, 0.0)
+
+
+def test_an_unknown_variant_is_inferred_from_the_state(monkeypatch):
+    from bot.preflop import table_status
+
+    monkeypatch.delenv("NLB_STRICT", raising=False)
+    cfg = Bare(**dict(FULL, variant="mystery_omaha"))
+    four = kit_state(cfg, cards=("As", "Ad", "Kh", "Qc"), legal=(
+        sdk.LegalAction("fold"), sdk.LegalAction("call", 20, 20), sdk.LegalAction("raise", 40, 90)))
+    rules, warnings = R.rules_from_state(four)
+    assert rules.variant == "mystery_omaha" and rules.hole_cards == 4 and rules.hole_cards_used == 2
+    assert rules.betting == "pot_limit"  # the max raise (90) is below the all-in (2000)
+    assert "mystery_omaha" in warnings[0]
+    assert "plo.py" in table_status(rules)  # same card rules as the PLO table: it's used
+    two = R.rules_from_state(kit_state(Bare(**dict(FULL, variant="mystery_holdem"))))[0]
+    assert two.hole_cards == 2 and two.hole_cards_used is None and two.betting == "no_limit"
+
+
+def test_only_nothing_usable_at_all_checks_or_folds(monkeypatch):
+    monkeypatch.delenv("NLB_STRICT", raising=False)
+    hopeless = replace(kit_state(Bare(variant="nlhe")), blinds="??")  # no schedule, no current blinds
+    with pytest.raises(R.RulesError):
+        R.rules_from_state(hopeless)
+    assert decide(hopeless, b"")[0] == sdk.Action.fold()
 
 
 def test_invalid_variant_entries_are_refused():
@@ -194,8 +270,12 @@ def test_a_table_made_for_other_rules_is_not_used():
     # Named plo, but trips beat straights here: the stamped table doesn't apply.
     odd = replace(game_rules(TableConfig(variant=PLO)), category_order=R.SHORT_DECK_ORDER)
     assert ranks_for(odd) is CHEN and "other card rules" in table_status(odd)
+    # No table under this ID, but one simulated under exactly these card rules: it's used.
     unnamed = replace(game_rules(TableConfig(variant=PLO)), variant="not a module name")
-    assert ranks_for(unnamed) is CHEN
+    assert ranks_for(unnamed).percentiles is ranks_for(game_rules(TableConfig(variant=PLO))).percentiles
+    assert "same card rules" in table_status(unnamed)
+    six_card = replace(unnamed, hole_cards=6)
+    assert ranks_for(six_card) is CHEN
 
 
 # -- the shipped package stands alone ----------------------------------------------------------

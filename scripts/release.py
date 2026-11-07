@@ -20,7 +20,8 @@ Steps, each fatal on failure:
   6. A smoke tournament and latency check on the artifact itself
      (scripts/bench_act.py --agent-dir OUT --strict).
   7. With the kit installed (poker-agent on PATH): poker-agent check, pack, and
-     play against the kit's examples, failing on any RULES ERROR it prints.
+     play against the kit's examples, failing on any RULES ERROR or RULES WARNING it
+     prints (the bot had to guess part of its rules from the real config).
      Without it those checks are reported as PENDING, never as passed.
   8. Write OUT.manifest.json beside OUT (not inside: it isn't uploaded):
      variant and rules, revision, test and bench results, environment, SDK.
@@ -207,9 +208,10 @@ def official(out: Path, kit: Path | None, tables: int) -> dict:
     run = subprocess.run([tool, "play", str(out), str(out), str(out), str(out), *examples, *examples,
                           "--tables", str(tables)], capture_output=True, text=True, cwd=kit)
     results["play"] = {"returncode": run.returncode, "stdout": run.stdout[-4000:], "stderr": run.stderr[-4000:]}
-    if run.returncode != 0 or "RULES ERROR" in run.stderr:
-        raise ReleaseError(f"poker-agent play failed or reported a RULES ERROR:\n{run.stderr[-3000:]}")
-    say("poker-agent play ok (no RULES ERROR)")
+    # play starts bots with a clean environment (no NLB_STRICT), so guesses show up as warnings.
+    if run.returncode != 0 or "RULES ERROR" in run.stderr or "RULES WARNING" in run.stderr:
+        raise ReleaseError(f"poker-agent play failed or the bot had to guess its rules:\n{run.stderr[-3000:]}")
+    say("poker-agent play ok (no RULES ERROR or RULES WARNING)")
     return results
 
 

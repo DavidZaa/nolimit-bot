@@ -92,14 +92,28 @@ def _table_module(variant: str):
         return None
 
 
+def _stamp(t) -> tuple:
+    return card_fingerprint(getattr(t, "CARD_RULES", {k: None for k in TABLE_RULES}))
+
+
 @lru_cache(maxsize=32)
 def _ranks(variant: str, fingerprint: tuple) -> tuple[HandRanks, str]:
     t = _table_module(variant)
-    if t is None:
-        return CHEN, f"no table for {variant!r}: Chen ranking"
-    if card_fingerprint(getattr(t, "CARD_RULES", {k: None for k in TABLE_RULES})) != fingerprint:
+    if t is not None and _stamp(t) == fingerprint:
+        return HandRanks.from_module(t), f"bot/hand_tables/{variant}.py"
+    # No table under this ID (say, rules inferred for an unannounced variant): any table
+    # simulated under exactly these card rules ranks the hands just as well.
+    import pkgutil
+
+    from bot import hand_tables
+
+    for info in sorted(pkgutil.iter_modules(hand_tables.__path__), key=lambda m: m.name):
+        other = _table_module(info.name)
+        if other is not None and info.name != variant and _stamp(other) == fingerprint:
+            return HandRanks.from_module(other), f"bot/hand_tables/{info.name}.py (same card rules)"
+    if t is not None:
         return CHEN, f"bot/hand_tables/{variant}.py was made for other card rules: Chen ranking"
-    return HandRanks.from_module(t), f"bot/hand_tables/{variant}.py"
+    return CHEN, f"no table for {variant!r}: Chen ranking"
 
 
 def ranks_for(rules) -> HandRanks:

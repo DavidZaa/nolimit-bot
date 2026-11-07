@@ -240,3 +240,149 @@ def from_dict(doc: dict) -> GameRules:
     if not isinstance(variant, str) or not variant:
         raise RulesError(f"variant must be a non-empty string, got {variant!r}")
     return GameRules(variant=variant, **card, **table)
+
+
+# -- degrading gracefully -------------------------------------------------------------------
+#
+# The tournament never shows stderr, and a bot that checks or folds every hand
+# passes the upload match, so failing closed on a config detail we guessed wrong
+# (an unannounced variant ID, the blinds schedule's name or shape, short payouts)
+# would look like a healthy bot scoring nothing. So the agent uses
+# rules_from_state: the strict rules when the config is as expected, otherwise
+# the best rules it can build from the config plus the state, with a warning per
+# guess. NLB_STRICT=1 restores fail-closed (pack.sh and local play set it, so
+# problems surface before upload). RulesError only when even that is impossible.
+
+DEFAULT_PAYOUTS = (50.0, 30.0, 20.0)  # the published default table payouts
+DEFAULT_HANDS_PER_LEVEL = 20
+DEFAULT_HAND_CAP = 250
+DEFAULT_STACK = 2000
+
+
+def strict_mode() -> bool:
+    import os
+
+    return os.environ.get("NLB_STRICT") == "1"
+
+
+def _current_level(state) -> tuple[int, int, int] | None:
+    raw = getattr(state, "blinds", None)
+    try:
+        return _level(raw, 0)
+    except Exception:
+        return None
+
+
+@lru_cache(maxsize=256)
+def _lenient(raw, hole: int, betting_hint: str, seats_seen: int, current_level):
+    """(rules, warnings) for a config the strict path refused. Cached on everything it reads:
+    the raw config, the hole-card count, the betting evidence ("pot_limit" when the max raise
+    is below the all-in, "no_limit" when it reaches it, "" when no raise is offered), the
+    number of seats and the current blinds."""
+    variant, players, stack, blinds, per_level, cap, payouts = raw
+    warnings = []
+    try:
+        card = card_rules(variant)
+    except RulesError:
+        # 4+ hole cards: PLO-style (exactly two from the hand); fewer: hold'em-style.
+        base = "plo" if hole >= 4 else "nlhe"
+        fields = dict(VARIANTS[base])
+        if hole:
+            fields["hole_cards"] = hole
+        if betting_hint:
+            fields["betting"] = betting_hint
+        card = check_card_rules(fields)
+        warnings.append(f"unknown variant {variant!r}: playing {base}-style rules "
+                        f"({card['hole_cards']} hole cards, {card['betting']})")
+    try:
+        seats = _int(players, "players", 2)
+    except RulesError:
+        seats = max(2, seats_seen)
+        warnings.append(f"players {players!r} unusable: using the {seats} seats at the table")
+    table = {}
+    for name, raw_value, check, default in (
+        ("starting_stack", stack, lambda v: _int(v, "starting_stack", 1), DEFAULT_STACK),
+        ("hands_per_level", per_level, lambda v: _int(v, "hands_per_level", 1), DEFAULT_HANDS_PER_LEVEL),
+        ("hand_cap", cap, lambda v: _int(v, "hand_cap", 1), DEFAULT_HAND_CAP),
+    ):
+        try:
+            table[name] = check(raw_value)
+        except RulesError:
+            table[name] = default
+            warnings.append(f"{name} {raw_value!r} unusable: using {default}")
+    try:
+        table["blind_schedule"] = check_table_rules(dict(
+            payouts=(1,), starting_stack=1, blind_schedule=blinds, hands_per_level=1, hand_cap=1,
+            seats=2))["blind_schedule"]
+    except RulesError:
+        if current_level is None:
+            raise RulesError("no usable blinds schedule and no current blinds on the state") from None
+        table["blind_schedule"] = (current_level,)
+        warnings.append(f"blinds schedule {_short(blinds)} unusable: using the current blinds {current_level}")
+    try:
+        table["payouts"] = check_table_rules(dict(
+            payouts=payouts, starting_stack=1, blind_schedule=((1, 2, 0),), hands_per_level=1, hand_cap=1,
+            seats=seats))["payouts"]
+    except RulesError:
+        table["payouts"] = (DEFAULT_PAYOUTS + (0.0,) * seats)[:seats]
+        warnings.append(f"payouts {_short(payouts)} unusable: using 50/30/20 over {seats} seats")
+    name = variant if isinstance(variant, str) and variant else "unknown"
+    return GameRules(variant=name, **card, **check_table_rules(dict(table, seats=seats))), tuple(warnings)
+
+
+def _short(value) -> str:
+    text = repr(value)
+    return text if len(text) <= 60 else text[:57] + "..."
+
+
+def rules_from_state(state, strict: bool | None = None) -> tuple[GameRules, tuple[str, ...]]:
+    """(rules, warnings) for a decision. The strict rules when the config is complete and
+    registered; otherwise (unless NLB_STRICT=1) the best rules the config and the state
+    allow, with one warning per guess. Raises RulesError only when nothing usable is left."""
+    cfg = getattr(state, "config", None)
+    if strict is None:
+        strict = strict_mode()
+    if not strict:  # a config already known to need guessing skips the failing strict pass
+        try:
+            guessed = _GUESSED.get(_guess_key(cfg, state))
+        except TypeError:
+            guessed = None
+        if guessed is not None:
+            return guessed
+    try:
+        return rules_from_config(cfg), ()
+    except RulesError:
+        if strict:
+            raise
+    raw = tuple(_frozen(getattr(cfg, name, None)) for name in _CONFIG_NAMES)
+    hole = len(getattr(state, "cards", ()) or ())
+    try:
+        r = state.can("raise")
+        me = next(s for s in state.seats if s.seat == state.seat)
+        all_in = int(me.stack) + int(me.bet)
+        betting = "" if r is None else "pot_limit" if int(r.max_amount) < all_in else "no_limit"
+    except Exception:
+        betting = ""
+    seats_seen = len(getattr(state, "seats", ()) or ())
+    try:
+        result = _lenient(raw, hole, betting, seats_seen, _current_level(state))
+    except TypeError:  # unhashable leftovers: skip the cache
+        return _lenient.__wrapped__(raw, hole, betting, seats_seen, _current_level(state))
+    # Remember it for this config and hole count, but only once the betting structure was
+    # actually seen (a raise on offer), so a first guess without evidence isn't frozen in.
+    if betting and len(_GUESSED) < 256:
+        try:
+            _GUESSED[_guess_key(cfg, state)] = result
+        except TypeError:
+            pass
+    return result
+
+
+_GUESSED: dict = {}  # _guess_key -> (rules, warnings), once guessed with betting evidence
+
+
+def _guess_key(cfg, state) -> tuple:
+    """Everything a guess reads except the betting evidence, which is fixed once seen."""
+    return (tuple(getattr(cfg, name, None) for name in _CONFIG_NAMES),
+            len(getattr(state, "cards", ()) or ()), len(getattr(state, "seats", ()) or ()),
+            _current_level(state))
