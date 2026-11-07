@@ -37,6 +37,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))  # bot/ sits next
 import poker_agent_sdk as sdk  # noqa: E402
 
 from bot.events import TableLog  # noqa: E402
+from bot.handeval import warm as warm_evaluator  # noqa: E402
 from bot.policy import PolicyBot  # noqa: E402
 from bot.rules import VARIANTS, RulesError, rules_from_config  # noqa: E402
 from bot.runtime import tune_gc  # noqa: E402
@@ -254,6 +255,7 @@ def _warm_up_one(variant: str) -> None:
                phase="betting", config=config, can=lambda k: next((a for a in legal if a.kind == k), None))
     try:
         decide(state, b"")
+        warm_evaluator(rules_from_config(config))  # the first postflop read builds its tables
     except Exception:
         pass
 

@@ -9,53 +9,40 @@ from bot.pushfold import PushFoldBot
 from bot.state import CALL, CHECK, FOLD, RAISE, Action, cards_from_str
 from engine import field
 from engine.field import CallingStation, ChenTAG, EquityCaller, Maniac, PushFold, RandomBot
-from engine.rules import NLHE, PLO, SHORT_DECK, TableConfig
+from engine.rules import NLHE, PLO, SHORT_DECK, TableConfig, game_rules
 from engine.sng import play_sng
 from helpers import Scripted, decisions, facing_shove, first_action
 
 
 # --- the hand reader ---------------------------------------------------------------
 
-@pytest.mark.parametrize("hole, board, bucket", [
-    ("KcQd", "Kh7s2d", TOP_PAIR),
-    ("AcAd", "Kh7s2d", TOP_PAIR),
-    ("7c5d", "Kh7s2d", WEAK_PAIR),
-    ("AcQd", "Kh7s7d", NOTHING),
-    ("Kc7d", "Kh7s2d", TWO_PAIR_PLUS),
-    ("7c7d", "Kh7s2d", MONSTER),
-    ("Ah5d", "2c3s4dKh", MONSTER),  # the wheel
-    ("AhKh", "Qh7h2h", MONSTER),
-    ("AcKd", "Qh7h2h9h", NOTHING),  # four hearts on board and none in hand
-    ("AcKd", "Qh7h2h9hJh", MONSTER),  # five on board plays in hold'em
-    ("Ah2c5d6s", "KhQh7h", NOTHING),  # Omaha needs two hearts from the hand
-    ("AhKh5d6s", "QhJh2h", MONSTER),
+HOLDEM = game_rules(TableConfig(variant=NLHE))
+OMAHA = game_rules(TableConfig(variant=PLO))
+
+
+@pytest.mark.parametrize("hole, board, rules, bucket", [
+    ("KcQd", "Kh7s2d", HOLDEM, TOP_PAIR),
+    ("AcAd", "Kh7s2d", HOLDEM, TOP_PAIR),
+    ("7c5d", "Kh7s2d", HOLDEM, WEAK_PAIR),
+    ("AcQd", "Kh7s7d", HOLDEM, NOTHING),
+    ("Kc7d", "Kh7s2d", HOLDEM, TWO_PAIR_PLUS),
+    ("7c7d", "Kh7s2d", HOLDEM, MONSTER),
+    ("Ah5d", "2c3s4dKh", HOLDEM, MONSTER),  # the wheel
+    ("AhKh", "Qh7h2h", HOLDEM, MONSTER),
+    ("AcKd", "Qh7h2h9h", HOLDEM, NOTHING),  # four hearts on board and none in hand
+    ("AcKd", "Qh7h2h9hJh", HOLDEM, MONSTER),  # five on board plays in hold'em
+    ("Ah2c5d6s", "KhQh7h", OMAHA, NOTHING),  # Omaha needs two hearts from the hand
+    ("AhKh5d6s", "QhJh2h", OMAHA, MONSTER),
+    ("Kd8h8sJs", "9c2sKc4d", OMAHA, TOP_PAIR),  # kings with the board beat the pocket eights
 ])
-def test_hand_buckets(hole, board, bucket):
-    assert made_hand(cards_from_str(hole), cards_from_str(board)) == bucket
-
-
-@pytest.mark.parametrize("hole_size", [2, 4])
-def test_hand_reader_agrees_with_the_engine_evaluator(hole_size):
-    rng = random.Random(hole_size)
-    for _ in range(15_000):
-        deck = rng.sample(range(52), hole_size + 5)
-        hole, board = deck[:hole_size], deck[hole_size : hole_size + rng.choice((3, 4, 5))]
-        assert made_hand(hole, board) == field.made_hand(hole, board), (hole, board)
-
-
-@pytest.mark.slow
-@pytest.mark.parametrize("hole_size", [2, 4])
-def test_hand_reader_agrees_with_the_engine_evaluator_at_scale(hole_size):
-    rng = random.Random(100 + hole_size)
-    for _ in range(300_000):
-        deck = rng.sample(range(52), hole_size + 5)
-        hole, board = deck[:hole_size], deck[hole_size : hole_size + rng.choice((3, 4, 5))]
-        assert made_hand(hole, board) == field.made_hand(hole, board), (hole, board)
+def test_hand_buckets(hole, board, rules, bucket):
+    assert made_hand(cards_from_str(hole), cards_from_str(board), rules) == bucket
 
 
 def test_hand_reader_survives_missing_cards():
-    assert made_hand((), ()) == NOTHING
-    assert made_hand(cards_from_str("As"), cards_from_str("Kh7s")) == NOTHING
+    assert made_hand((), (), HOLDEM) == NOTHING
+    assert made_hand(cards_from_str("As"), cards_from_str("Kh7s"), HOLDEM) == NOTHING
+    assert made_hand(cards_from_str("AsAd"), cards_from_str("Kh"), OMAHA) == NOTHING
 
 
 # --- how it plays ------------------------------------------------------------------
@@ -113,8 +100,10 @@ class Recorder:
 
 
 @pytest.mark.parametrize("variant", [NLHE, SHORT_DECK, PLO], ids=lambda v: v.name)
-def test_it_starts_as_an_exact_port_of_the_field_bot(variant):
-    # Remove once ours is deliberately tuned away from the frozen field copy.
+def test_it_is_still_the_field_bot_except_where_it_reads_hands_correctly(variant):
+    # It started as an exact port of the frozen field copy. The only intended difference
+    # since: our hand reader follows the variant's rules (short deck's A-6-7-8-9 straight,
+    # Omaha's best two-card pair), where the field copy's reader doesn't.
     states = []
     config = TableConfig(variant=variant, enforce_time=False)
     for t in range(15):
@@ -124,8 +113,13 @@ def test_it_starts_as_an_exact_port_of_the_field_bot(variant):
         play_sng(bots, config, seed=t)
     assert len(states) > 1000
     ours, theirs = PushFoldBot(), PushFold()
+    splits = 0
     for st in states:
-        assert ours.act(st) == theirs.act(st), st
+        if ours.act(st) != theirs.act(st):
+            splits += 1
+            assert variant is not NLHE and st.street > 0, st
+            assert made_hand(st.hole, st.board, st.rules) != field.made_hand(st.hole, st.board), st
+    assert splits < 0.05 * len(states)
 
 
 @pytest.mark.parametrize("variant", [NLHE, SHORT_DECK, PLO], ids=lambda v: v.name)
@@ -147,7 +141,18 @@ def test_unwrapped_it_always_plays_legally(variant):
     ("KcQd", "JhTs2d", True),  # T-J-Q-K: a nine or an ace
     ("AcKd", "QhJs2d", False),  # J-Q-K-A only fills with a ten
     ("Kc2d", "Th9s8d", False),  # 8-9-T-? with no hole card in the run
-    ("Ah5hKdQd", "Kh9h4d", False),  # Omaha isn't read for draws
+    ("9c8d", "Th7s2dKh", True),  # still drawing on the turn
+    ("9c8d", "Th7s2dKh3c", False),  # nothing left to draw to on the river
 ])
 def test_strong_draws(hole, board, draw):
-    assert strong_draw(cards_from_str(hole), cards_from_str(board)) is draw
+    assert strong_draw(cards_from_str(hole), cards_from_str(board), HOLDEM) is draw
+
+
+@pytest.mark.parametrize("hole, board, draw", [
+    ("Ah5hKdQd", "Kh9h4d", True),  # two hearts in hand, two on board
+    ("Ah5cKdQd", "Kh9h4h", False),  # one heart in hand can't use a heart flush
+    ("9c8dKsKh", "Th7s2d", True),  # 9-8 with T-7: a six or a jack
+    ("9c2dKsKh", "Th8s7d", False),  # one card of the run in hand: Omaha needs two
+])
+def test_omaha_draws_use_exactly_two_hole_cards(hole, board, draw):
+    assert strong_draw(cards_from_str(hole), cards_from_str(board), OMAHA) is draw

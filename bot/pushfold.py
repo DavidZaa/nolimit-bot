@@ -110,7 +110,7 @@ class PushFoldBot:
 
     def _postflop(self, state) -> Action:
         legal = state.legal
-        strength = made_hand(state.hole, state.board)
+        strength = made_hand(state.hole, state.board, state.rules)
         if legal.can_check:
             size = self._bet_when_checked_to(state, strength)
             return Action(CHECK) if size is None else _raise_to(legal, size)

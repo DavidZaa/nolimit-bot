@@ -1,116 +1,119 @@
-"""Postflop hand reading for the submitted bot: stdlib only, no tables to load.
+"""Postflop hand reading for the strategy, on top of the complete evaluator in bot.handeval.
 
-Decisions only need to know roughly how strong the made hand is, so this
-buckets it (nothing / weak pair / top pair / two pair / trips or better)
-straight from rank and suit counts instead of scoring five-card combinations.
-Hold'em hands use the best five of all the cards; hands of four or more
-cards are read as Omaha, exactly two from the hand.
+hand_strength() gives the whole picture: the hand's exact value (comparable
+across hands), its category under the variant's order, and the coarse bucket
+the push/fold strategy was written and measured against:
 
-PLACEHOLDER(kit): GameState doesn't carry the variant, so the hole-card
-count decides Omaha, and A-2-3-4-5 is taken as the low straight.
+    NOTHING < WEAK_PAIR < TOP_PAIR < TWO_PAIR_PLUS < MONSTER (trips or better)
+
+The buckets read a pair the way a player does: a pair that's only on the
+board is nothing, a pocket pair over the board or a pair with the board's
+top card is top pair, anything lower is weak. Strategy that needs to tell a
+straight from a flush or a full house reads hand_strength().category or
+.value instead; the frozen v5 rules deliberately treat all of them as one.
+
+Every function takes the table's rules (bot.state.GameRules); nothing here
+reads the variant off the number of hole cards.
 """
 
 from __future__ import annotations
 
+from functools import lru_cache
 from itertools import combinations
+from typing import NamedTuple
+
+from bot.handeval import category, hand_value, tiebreak
+from bot.rules import FLUSH, FULL_HOUSE, PAIR, QUADS, STRAIGHT, STRAIGHT_FLUSH, TRIPS, TWO_PAIR, RulesError
 
 # Made-hand buckets, weakest first.
 NOTHING, WEAK_PAIR, TOP_PAIR, TWO_PAIR_PLUS, MONSTER = range(5)
-
-_HIGH, _PAIR, _TWO_PAIR, _STRONG = range(4)  # trips, straights and flushes are all _STRONG
-
-
-def _level(cards) -> int:
-    """How far the best five of `cards` gets, from counts alone."""
-    suits = [0, 0, 0, 0]
-    counts = [0] * 13
-    for c in cards:
-        suits[c & 3] += 1
-        counts[c >> 2] += 1
-    if max(suits) >= 5 or max(counts) >= 3:
-        return _STRONG
-    run = 1 if counts[12] else 0  # the ace also plays low
-    for n in counts:
-        run = run + 1 if n else 0
-        if run >= 5:
-            return _STRONG
-    pairs = counts.count(2)
-    return _TWO_PAIR if pairs >= 2 else _PAIR if pairs else _HIGH
+_MONSTERS = frozenset((TRIPS, STRAIGHT, FLUSH, FULL_HOUSE, QUADS, STRAIGHT_FLUSH))
 
 
-_WHEEL = frozenset((12, 0, 1, 2, 3))
+class HandStrength(NamedTuple):
+    value: int  # bot.handeval value: compare hands with it
+    category: int  # bot.rules category constant
+    bucket: int  # NOTHING .. MONSTER
 
 
-def _omaha_level(hole, board) -> int:
-    """Best level over every two-from-the-hand, three-from-the-board five.
-
-    Each five is classified by how many distinct ranks it has (5: straight,
-    flush or nothing; 4: a pair; 3: trips or two pair; fewer: full house or
-    quads), which is far cheaper than counting, and the search stops at the
-    first strong five.
-    """
-    pairs = [((a >> 2, b >> 2), a & 3 if a & 3 == b & 3 else -1) for a, b in combinations(hole, 2)]
-    best = _HIGH
-    for x, y, z in combinations(board, 3):
-        b_ranks = (x >> 2, y >> 2, z >> 2)
-        b_suit = x & 3 if x & 3 == y & 3 == z & 3 else -2
-        for h_ranks, h_suit in pairs:
-            ranks = {*b_ranks, *h_ranks}
-            distinct = len(ranks)
-            if distinct == 5:
-                if h_suit == b_suit or max(ranks) - min(ranks) == 4 or ranks == _WHEEL:
-                    return _STRONG
-            elif distinct == 4:
-                if best == _HIGH:
-                    best = _PAIR
-            elif distinct == 3:
-                five = b_ranks + h_ranks
-                if any(five.count(r) == 3 for r in ranks):
-                    return _STRONG
-                best = _TWO_PAIR
-            else:
-                return _STRONG
-    return best
-
-
-def strong_draw(hole, board) -> bool:
-    """A flush draw or an open-ended straight draw that uses a hole card.
-
-    Hold'em-style hands only (Omaha returns False): four to a flush, or four
-    ranks in a row open at both ends, with at least one card from the hand.
-    """
-    if len(hole) >= 4:
-        return False
-    suits = [0, 0, 0, 0]
-    for c in (*hole, *board):
-        suits[c & 3] += 1
-    if any(suits[c & 3] == 4 for c in hole):
-        return True
-    ranks = {c >> 2 for c in (*hole, *board)}
-    mine = {c >> 2 for c in hole}
-    # Four in a row from 2-3-4-5 (the ace fills below) up to 9-T-J-Q (the king fills above).
-    return any(mine.intersection(range(low, low + 4)) and all(r in ranks for r in range(low, low + 4))
-               for low in range(9))
-
-
-def made_hand(hole, board) -> int:
-    """Bucket a postflop hand. A pair that's only on the board counts as nothing."""
-    if len(hole) + len(board) < 5:
-        return NOTHING
-    level = _omaha_level(hole, board) if len(hole) >= 4 else _level((*hole, *board))
-    if level == _STRONG:
+def _bucket(cat: int, value: int, hole, board) -> int:
+    if cat in _MONSTERS:
         return MONSTER
-    if level == _TWO_PAIR:
+    if cat == TWO_PAIR:
         return TWO_PAIR_PLUS
-    if level == _HIGH:
+    if cat != PAIR:
         return NOTHING
+    pair = tiebreak(value)[0]
+    mine = [c >> 2 for c in hole].count(pair)
+    if not mine:
+        return NOTHING  # the pair is the board's
+    top = max(c >> 2 for c in board)
+    if mine >= 2:  # a pocket pair
+        return TOP_PAIR if pair > top else WEAK_PAIR
+    return TOP_PAIR if pair == top else WEAK_PAIR
+
+
+def hand_strength(hole, board, rules) -> HandStrength | None:
+    """The best legal hand now, or None before there is one (preflop, or too little board)."""
+    try:
+        value = hand_value(hole, board, rules)
+    except ValueError:
+        return None
+    cat = category(value, rules)
+    return HandStrength(value, cat, _bucket(cat, value, hole, board))
+
+
+def made_hand(hole, board, rules) -> int:
+    """The strategy's bucket for the best legal hand (NOTHING before there is one)."""
+    if rules is None:
+        raise RulesError("explicit rules required")
+    s = hand_strength(hole, board, rules)
+    return NOTHING if s is None else s.bucket
+
+
+@lru_cache(maxsize=16)
+def _straights(ranks: tuple[int, ...], ace_low: bool) -> tuple[frozenset, ...]:
+    out = [frozenset(ranks[i:i + 5]) for i in range(len(ranks) - 4)]
+    if ace_low and len(ranks) >= 5 and ranks[-1] == 12:
+        out.append(frozenset((ranks[-1], *ranks[:4])))
+    return tuple(out)
+
+
+def straight_outs(hole, board, rules) -> frozenset[int]:
+    """Ranks that, as the next board card, would complete a straight this hand can use."""
+    hole_ranks = {c >> 2 for c in hole}
     board_ranks = {c >> 2 for c in board}
-    top = max(board_ranks)
-    hole_ranks = [c >> 2 for c in hole]
-    pockets = [r for r in set(hole_ranks) if hole_ranks.count(r) >= 2]
-    if pockets:
-        return TOP_PAIR if max(pockets) > top else WEAK_PAIR
-    paired = [r for r in set(hole_ranks) if r in board_ranks]
-    if not paired:
-        return NOTHING
-    return TOP_PAIR if max(paired) == top else WEAK_PAIR
+    used = rules.hole_cards_used
+    outs = set()
+    for straight in _straights(tuple(rules.ranks), rules.ace_low_straight):
+        if used is None:
+            missing = straight - hole_ranks - board_ranks
+            if len(missing) == 1 and straight & hole_ranks:
+                outs |= missing
+            continue
+        for mine in combinations(sorted(straight & hole_ranks), used):
+            missing = straight - set(mine) - board_ranks
+            if len(missing) == 1:
+                outs |= missing
+    return frozenset(outs)
+
+
+def flush_draw(hole, board, rules) -> bool:
+    """One more suited board card would give this hand a flush it can use."""
+    used = rules.hole_cards_used
+    for suit in {c & 3 for c in hole}:
+        mine = sum(1 for c in hole if c & 3 == suit)
+        theirs = sum(1 for c in board if c & 3 == suit)
+        if used is None:
+            if mine + theirs == 4:
+                return True
+        elif mine >= used and theirs == 4 - used:
+            return True
+    return False
+
+
+def strong_draw(hole, board, rules) -> bool:
+    """A flush draw or a straight draw with two or more completing ranks (open-ender, double gutter)."""
+    if len(board) >= rules.board_size:
+        return False
+    return flush_draw(hole, board, rules) or len(straight_outs(hole, board, rules)) >= 2

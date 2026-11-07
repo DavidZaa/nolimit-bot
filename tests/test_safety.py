@@ -204,7 +204,7 @@ def _fuzz_states(count, seed):
             try:
                 bot.act(st)
             except RulesError:
-                assert st.rules is None and isinstance(bot, PolicyBot)
+                assert st.rules is None
         for bot in safe:
             assert is_legal(bot.act(st), st.legal)
         bot = wrapped[rng.randrange(len(wrapped))]

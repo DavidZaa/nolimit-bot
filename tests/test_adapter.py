@@ -153,3 +153,15 @@ def test_the_bot_and_the_simulator_use_the_one_default_points_setting():
     from engine.rules import PLACEHOLDER_PAYOUTS
 
     assert PLACEHOLDER_PAYOUTS is icm.PAYOUTS and TableConfig().payouts is icm.PAYOUTS
+
+
+def test_importing_the_agent_builds_every_registered_variants_tables():
+    # A cold evaluator table costs ~10 ms: it must be built at import, not on a first river.
+    from bot import handeval
+    from bot.rules import VARIANTS, rules_from_config
+
+    for variant in VARIANTS:
+        rules = rules_from_config(sdk.Config(variant=variant))
+        misses = handeval._tables.cache_info().misses
+        handeval.warm(rules)
+        assert handeval._tables.cache_info().misses == misses, variant

@@ -177,7 +177,7 @@ class PolicyBot(PushFoldBot):
         flop = [rec for rec in state.actions if rec.street == 1 and rec.kind == RAISE]
         if len(flop) != 1 or self.tracker.cbet(flop[0].seat) < CBET_DEFEND:
             return False  # a raise, or a bettor who doesn't bet every flop: believe it
-        return strength >= WEAK_PAIR or strong_draw(state.hole, state.board)
+        return strength >= WEAK_PAIR or strong_draw(state.hole, state.board, state.rules)
 
     def _resteal_range(self, state, depth_bb):
         if "defend" not in self.active or not RESTEAL_DEPTH_BB[0] <= depth_bb <= RESTEAL_DEPTH_BB[1]:
