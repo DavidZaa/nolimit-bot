@@ -8,10 +8,12 @@ keep building it from the next batch of events. Each hand is counted into
 the tracker once, when its closing stack events arrive or the next hand
 starts.
 
-Event kinds (from the kit's description): hand, ante, blind, fold, check,
-call (chips added), raise (the raiser's total for the round), board (new
-cards only), show, win, stack (the seat's stack when the hand ends). Kinds
-we don't know are ignored. PLACEHOLDER(kit): confirm the field names.
+Event kinds (poker_agent_protocol.game.Event): hand, ante, blind, fold,
+check, call (chips added), raise (the raiser's total for the round), board
+(new cards only), show, muck, win, stack (the seat's stack when the hand
+ends); the Bay Area variant adds select (an acknowledgement, no cards) and
+reveal (the seat's exposed card, kept as `exposed` for the rest of the hand).
+Kinds we don't know are ignored.
 """
 
 from __future__ import annotations
@@ -22,7 +24,8 @@ VOLUNTARY = {"fold": FOLD, "check": CHECK, "call": CALL, "raise": RAISE}
 
 
 class TableLog:
-    __slots__ = ("hand", "street", "acted", "bets", "records", "start", "ends", "counted", "blinds")
+    __slots__ = ("hand", "street", "acted", "bets", "records", "start", "ends", "counted", "blinds",
+                 "exposed")
 
     def __init__(self) -> None:
         self.hand = None  # current hand number
@@ -34,6 +37,7 @@ class TableLog:
         self.ends: dict[int, int] = {}  # seat -> stack when the last hand ended
         self.counted = False  # this hand is already in the tracker
         self.blinds = 0  # blinds posted this hand, to tell small from big
+        self.exposed: dict[int, str] = {}  # seat -> its revealed card this hand (Bay Area)
 
     def feed(self, events, index: dict, tracker, default_stack: int, seats: int) -> None:
         """Consume a batch of events. `index` maps the kit's seat ids to 0..seats-1."""
@@ -58,6 +62,10 @@ class TableLog:
                     self.ends[seat] = int(amount)
             elif seat is None:
                 continue
+            elif kind == "reveal":
+                cards = tuple(getattr(ev, "cards", ()) or ())
+                if cards:
+                    self.exposed[seat] = str(cards[0])
             elif kind == "ante":
                 self.records.append([seat, self.street, POST_ANTE, int(amount)])
             elif kind == "blind":
@@ -80,6 +88,7 @@ class TableLog:
             start = [default_stack] * seats
         self.hand, self.street, self.acted, self.bets = number, 0, False, {}
         self.records, self.start, self.ends, self.counted, self.blinds = [], start, {}, False, 0
+        self.exposed = {}
 
     def _close(self, tracker) -> None:
         if self.hand is not None and not self.counted and self.records:
@@ -91,12 +100,14 @@ class TableLog:
 
     def to_list(self) -> list:
         return [self.hand, self.street, int(self.acted), sorted(self.bets.items()), self.records,
-                self.start, sorted(self.ends.items()), int(self.counted), self.blinds]
+                self.start, sorted(self.ends.items()), int(self.counted), self.blinds,
+                sorted(self.exposed.items())]
 
     @classmethod
     def from_list(cls, row) -> "TableLog":
         log = cls()
-        (log.hand, log.street, acted, bets, log.records, log.start, ends, counted, log.blinds) = row
+        (log.hand, log.street, acted, bets, log.records, log.start, ends, counted, log.blinds) = row[:9]
+        log.exposed = {int(k): str(v) for k, v in (row[9] if len(row) > 9 else ())}
         log.acted, log.counted = bool(acted), bool(counted)
         log.bets = {int(k): int(v) for k, v in bets}
         log.ends = {int(k): int(v) for k, v in ends}

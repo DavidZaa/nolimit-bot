@@ -1,11 +1,10 @@
-"""Stand-in for the starter kit's poker_agent_sdk, from the organizers' published description.
+"""Stand-in for the starter kit's poker_agent_sdk, for runs and tests without the kit installed.
 
-The real SDK only arrives at kickoff. This mirrors what the kit page says a
-bot sees, so adapter.py can be written and tested now: an Agent base class
-with act(state, memory) -> (Action, bytes), Action constructors, legal
-actions with min/max amounts, and a state carrying events, seats, blinds and
-the table config. On kit day, diff this against the real SDK first: every
-name here is a PLACEHOLDER(kit).
+Our own minimal re-statement of the shapes in the kit's poker_agent_protocol/game.py
+(checked against it on 2026-11-06): Action(kind, amount, cards), LegalAction,
+Event(kind, seat, amount=0, cards), Seat, BlindLevel(small_blind, big_blind, ante)
+for state.blinds and every config.blinds level, the table config and the state.
+tests/test_real_sdk.py runs the adapter on the real types whenever the kit is installed.
 
 Local only. It never ships: pack.sh copies agent.py and bot/ alone.
 """
@@ -19,6 +18,7 @@ from dataclasses import dataclass, field
 class Action:
     kind: str
     amount: int = 0
+    cards: tuple[int, ...] = ()  # whole numbers for a variant's own kind (Bay Area: select indexes)
 
     @classmethod
     def fold(cls) -> "Action":
@@ -48,8 +48,15 @@ class LegalAction:
 class Event:
     kind: str
     seat: int | None = None
-    amount: int | None = None
+    amount: int = 0
     cards: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class BlindLevel:
+    small_blind: int
+    big_blind: int
+    ante: int = 0
 
 
 @dataclass(frozen=True)
@@ -69,9 +76,7 @@ class Config:
     players: int = 8
     starting_stack: int = 2000
     # The published fields only: the variant is an ID, its card rules are in RULES.md.
-    # PLACEHOLDER(kit): the blinds schedule's real shape; we accept (small, big[, ante])
-    # sequences, dicts or objects with small/big/ante.
-    blinds: tuple = ((10, 20, 0),)  # the schedule: (small, big, ante) per level
+    blinds: tuple = (BlindLevel(10, 20, 0),)  # the schedule; the last level repeats
     hands_per_level: int = 20
     hand_cap: int = 250
     payouts: tuple[float, ...] = (50.0, 30.0, 20.0, 0.0, 0.0, 0.0, 0.0, 0.0)
@@ -90,7 +95,7 @@ class State:
     legal_actions: tuple[LegalAction, ...]
     seats: tuple[Seat, ...]
     button: int
-    blinds: tuple[int, ...]  # current (small, big[, ante])
+    blinds: BlindLevel  # the current level
     hand_number: int
     players_remaining: int
     config: Config

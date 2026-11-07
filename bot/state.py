@@ -139,6 +139,7 @@ class GameState:
     legal: LegalActions
     actions: tuple[ActionRecord, ...]  # this hand so far, forced posts included
     rules: GameRules | None = None
+    exposed: tuple[int, ...] = ()  # per seat: its exposed card this hand, -1 if none (Bay Area)
 
 
 @dataclass(frozen=True, slots=True)

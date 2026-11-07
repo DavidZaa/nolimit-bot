@@ -136,7 +136,7 @@ class KitSeat:
             seat=SEAT_ID(gs.seat), cards=tuple(card_to_str(c) for c in gs.hole),
             board=tuple(card_to_str(c) for c in gs.board), pot=gs.pot, to_call=legal.call_amount,
             legal_actions=tuple(kinds), seats=tuple(seats), button=SEAT_ID(gs.button),
-            blinds=(gs.small_blind, gs.big_blind, gs.ante), hand_number=gs.hand_number,
+            blinds=sdk.BlindLevel(gs.small_blind, gs.big_blind, gs.ante), hand_number=gs.hand_number,
             players_remaining=gs.players_left, events=tuple(self.pending),
             config=sdk_config(self.config),
         )
@@ -145,6 +145,7 @@ class KitSeat:
 def sdk_config(cfg) -> "sdk.Config":
     """The SDK's state.config for a table run under our TableConfig: the published fields only,
     with the variant as an ID (its card rules come from bot.rules.VARIANTS)."""
-    return sdk.Config(players=cfg.seats, starting_stack=cfg.starting_stack, blinds=cfg.schedule.levels,
+    return sdk.Config(players=cfg.seats, starting_stack=cfg.starting_stack,
+                      blinds=tuple(sdk.BlindLevel(*level) for level in cfg.schedule.levels),
                       hands_per_level=cfg.schedule.hands_per_level, hand_cap=cfg.max_hands,
                       payouts=tuple(cfg.payouts), variant=cfg.variant.name)
