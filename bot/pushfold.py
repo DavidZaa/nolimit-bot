@@ -251,6 +251,8 @@ class PushFoldBot:
                 open_share = open_shares[position] if position else 0.45 / 3 ** 0.8
                 if depth <= FIGHT_BB:
                     return commit(legal) if pct <= FIGHT_SHARE * open_share else check_or(legal, call=False)
+                if flag("fight_mid", "off") == "on" and depth <= 50:  # 30-50 BB: shove the top 30% of the open range
+                    return commit(legal) if pct <= 0.30 * open_share else check_or(legal, call=False)
                 if flag("deep_fight", "off") == "on":
                     raiser = pre_raises[1]
                     their_all_in = highest >= state.stacks[raiser] + state.bets[raiser]

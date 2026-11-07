@@ -19,7 +19,7 @@ import os
 FLAGS: dict = {"short_handed": "on", "late_position": "on", "calibrated": "on", "exposed_reads": "on",
                "cal_tuned": "on", "resteal": "on", "bubble": "on", "expose_play": "on", "late_streets": "on",
                "bb_defense": "on", "maniac_calls": "on", "turn_barrel": "on",
-               "river_bluff": "on", "turn_semibluff": "on", "min_size": "on"}  # r5
+               "river_bluff": "on", "turn_semibluff": "on", "min_size": "on", "fight_mid": "on"}  # r5
 
 
 def flag(name: str, default: str) -> str:
