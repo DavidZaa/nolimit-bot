@@ -20,17 +20,23 @@ Every adjustment is a named feature so each can be measured on its own
 
 With no features it plays exactly like PushFoldBot.
 
-Omaha hands (four hole cards) get their own feature set. Both range-scaling
-features measured the other way round there: preflop equities run so close
-that calling a known shover wider pays and tightening for ICM over-folds,
-and the preflop ranking only sees the best two of the four cards.
+Omaha-style rules (hands must use an exact number of hole cards) get their
+own feature set. Both range-scaling features measured the other way round in
+PLO: preflop equities run so close that calling a known shover wider pays
+and tightening for ICM over-folds.
+
+Every decision reads its rules from state.rules: the variant picks the
+feature set and the starting-hand table, and the table's own payouts drive
+the ICM. A state without rules raises (SafeBot then checks or folds) rather
+than playing hold'em with 50/30/20 by default.
 """
 
 from __future__ import annotations
 
 from bot.hands import TOP_PAIR, WEAK_PAIR, strong_draw
-from bot.icm import PAYOUTS, cached_bubble_factor
-from bot.preflop import ACTIVE
+from bot.icm import cached_bubble_factor
+from bot.preflop import ranks_for
+from bot.rules import RulesError
 from bot.state import CALL, RAISE
 from bot.pushfold import PushFoldBot, _last_raiser, seats_behind
 from bot.tracker import PRIORS, Tracker, start_stacks
@@ -41,7 +47,6 @@ V5_FEATURES = ("steals", "cbets", "broken", "icm")
 V6_FEATURES = V5_FEATURES + ("defend",)  # candidate, not submitted until it clears both fields
 # What PolicyBot() and the submission play, for hold'em-style and Omaha hands.
 DEFAULT_FEATURES, DEFAULT_OMAHA_FEATURES = V5_FEATURES, V4_FEATURES
-OMAHA_HOLE_CARDS = 4
 
 STEAL_ANY_TWO = 0.9  # P(everyone behind folds) at which any two cards steal
 ANY_TWO = float("inf")  # a range multiplier every hand clears
@@ -59,13 +64,14 @@ STEAL_SIZE_BB = 4  # opens bigger than this aren't steals
 
 
 class PolicyBot(PushFoldBot):
-    def __init__(self, features=None, payouts=PAYOUTS,
-                 icm_powers=(ICM_CALL_POWER, ICM_SHOVE_POWER), omaha_features=None,
+    def __init__(self, features=None, icm_powers=(ICM_CALL_POWER, ICM_SHOVE_POWER), omaha_features=None,
                  ranks=None):
         """No `features` means the submitted configuration. `omaha_features`
         defaults to the submitted Omaha set with it, and to `features` otherwise.
-        `ranks` defaults to the generated starting-hand table (Chen without one)."""
-        self.ranks = ACTIVE if ranks is None else ranks
+        `ranks` pins one starting-hand ranking; by default each decision uses
+        bot.preflop.ranks_for(state.rules)."""
+        self.fixed_ranks = ranks
+        self.ranks = ranks
         if features is None:
             features, default_omaha = DEFAULT_FEATURES, DEFAULT_OMAHA_FEATURES
         else:
@@ -77,7 +83,7 @@ class PolicyBot(PushFoldBot):
         self.features = frozenset(features)
         self.omaha_features = frozenset(omaha_features)
         self.active = self.features  # the set in play for the current decision
-        self.payouts = tuple(payouts)
+        self.payouts = ()  # the current decision's, from state.rules
         self.call_power, self.shove_power = icm_powers
         self.tracker = Tracker()
 
@@ -88,9 +94,13 @@ class PolicyBot(PushFoldBot):
         self.tracker.hand_over(result)
 
     def act(self, state):
+        rules = state.rules
+        if rules is None:
+            raise RulesError("no rules on this state")
         self.tracker.observe(state)
-        omaha = len(state.hole) >= OMAHA_HOLE_CARDS
-        self.active = self.omaha_features if omaha else self.features
+        self.active = self.features if rules.hole_cards_used is None else self.omaha_features
+        self.ranks = self.fixed_ranks or ranks_for(rules)
+        self.payouts = rules.payouts
         return super().act(state)
 
     def _behind(self, state, seat):

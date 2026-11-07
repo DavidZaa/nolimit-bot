@@ -42,7 +42,7 @@ from bot.state import (
 )
 from engine.handeval import best_hand
 from engine.latency import LatencyHistogram
-from engine.rules import TableConfig
+from engine.rules import TableConfig, game_rules
 
 
 def clock_step_ns(clock, spin_ns: int = 2_000_000) -> int | None:
@@ -304,7 +304,7 @@ class _Hand:
             self.hand_number, seat, self.n, self.button, self.sb_seat, self.bb_seat,
             self.sb, self.bb, self.ante, self.street, self.holes[seat], self.board,
             tuple(self.stacks), tuple(self.bets), sum(self.contrib), tuple(self.in_hand),
-            len(self.alive), legal, tuple(self.actions),
+            len(self.alive), legal, tuple(self.actions), game_rules(self.config),
         )
         bot = self.bots[seat]
         failed = False

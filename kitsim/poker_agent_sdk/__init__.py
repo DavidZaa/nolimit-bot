@@ -68,7 +68,10 @@ class Config:
     variant: str = "nlhe"
     players: int = 8
     starting_stack: int = 2000
-    blinds: tuple = ()  # the schedule: (small, big, ante) per level
+    # The published fields only: the variant is an ID, its card rules are in RULES.md.
+    # PLACEHOLDER(kit): the blinds schedule's real shape; we accept (small, big[, ante])
+    # sequences, dicts or objects with small/big/ante.
+    blinds: tuple = ((10, 20, 0),)  # the schedule: (small, big, ante) per level
     hands_per_level: int = 20
     hand_cap: int = 250
     payouts: tuple[float, ...] = (50.0, 30.0, 20.0, 0.0, 0.0, 0.0, 0.0, 0.0)

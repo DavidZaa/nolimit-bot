@@ -13,11 +13,17 @@ each is a PLACEHOLDER(kit) until checked against the real SDK):
   1. Diff kitsim/poker_agent_sdk against the real SDK: Action constructors,
      state.can(), legal action kinds and min/max, event kinds and fields,
      seats/status names, state.blinds, state.config.payouts.
-  2. Hand rankings: if the variant isn't plain hold'em, install a table
-     (gen/hand_ranks.py docstring). Payouts need no step: every table's own
-     state.config.payouts drives the ICM.
-  3. pytest -q; then the kit's own `poker-agent check` and a `poker-agent play`
-     run against its examples; then scripts/pack.sh and upload.
+  2. Rules: register the announced variant in bot/rules.py VARIANTS under the
+     exact ID state.config.variant reports, and generate its starting-hand
+     table (gen/hand_ranks.py docstring). Payouts, stack, blinds, level length,
+     hand cap and seats need no step: every table's config carries its own.
+  3. pytest -q; then scripts/pack.sh --variant <ID>, which runs the kit's own
+     `poker-agent check`, and a `poker-agent play` against its examples.
+
+Rules are never guessed. If the config names a variant with no registered
+rules, or a tournament setting is missing or malformed, the decision checks
+or folds (a legal action, not a failed decision) and the process prints one
+RULES ERROR line to stderr, which `poker-agent play` shows locally.
 """
 
 from __future__ import annotations
@@ -31,12 +37,12 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))  # bot/ sits next
 import poker_agent_sdk as sdk  # noqa: E402
 
 from bot.events import TableLog  # noqa: E402
-from bot.icm import PAYOUTS  # noqa: E402
 from bot.policy import PolicyBot  # noqa: E402
+from bot.rules import VARIANTS, RulesError, rules_from_config  # noqa: E402
 from bot.runtime import tune_gc  # noqa: E402
 from bot.safety import SafeBot  # noqa: E402
 from bot.state import (  # noqa: E402
-    CALL, CHECK, FOLD, POST_BB, POST_SB, RAISE, Action, GameState, LegalActions, card_from_str,
+    CALL, CHECK, FOLD, POST_BB, POST_SB, RAISE, Action, GameRules, GameState, LegalActions, card_from_str,
 )
 from bot.tracker import Tracker  # noqa: E402
 
@@ -102,7 +108,7 @@ def legal_actions(state, stack: int) -> LegalActions:
                         raise_ is not None and hi >= lo > 0, lo if raise_ else 0, hi if raise_ else 0)
 
 
-def to_game_state(state, log: TableLog, index: dict) -> GameState:
+def to_game_state(state, log: TableLog, index: dict, rules: GameRules) -> GameState:
     n = len(index)
     seats = sorted(state.seats, key=lambda s: s.seat)
     stacks = tuple(int(s.stack) for s in seats)
@@ -129,6 +135,7 @@ def to_game_state(state, log: TableLog, index: dict) -> GameState:
         stacks=stacks, bets=bets, pot=int(state.pot), in_hand=in_hand,
         players_left=int(getattr(state, "players_remaining", 0) or sum(1 for s in stacks if s)),
         legal=legal_actions(state, stacks[me]), actions=log.actions(),
+        rules=rules,
     )
 
 
@@ -183,13 +190,27 @@ def decide(state, memory: bytes):
         if getattr(state, "phase", "betting") != "betting" or not any(
                 state.can(k) for k in ("fold", "check", "call", "raise")):
             return automatic(state), new_memory
-        payouts = tuple(float(p) for p in (getattr(cfg, "payouts", None) or PAYOUTS))
-        policy = PolicyBot(payouts=payouts)
+        rules = rules_from_config(cfg)
+        policy = PolicyBot()
         policy.tracker = tracker
-        action = SafeBot(policy).act(to_game_state(state, log, index))
+        action = SafeBot(policy).act(to_game_state(state, log, index, rules))
         return to_kit_action(action, state), new_memory
+    except RulesError as exc:
+        _report_once(f"RULES ERROR (checking/folding every decision): {exc}")
+        return _fallback(state), new_memory
     except Exception:
         return _fallback(state), new_memory
+
+
+_reported: set = set()
+
+
+def _report_once(message: str) -> None:
+    """One stderr line per problem per process. The tournament never shows it; local
+    `poker-agent play` does, and pack.sh fails a release that prints it."""
+    if message not in _reported:
+        _reported.add(message)
+        print(f"nolimit-bot: {message}", file=sys.stderr, flush=True)
 
 
 class Agent(sdk.Agent):
@@ -209,20 +230,28 @@ def build_bot():
 
 
 def _warm_up() -> None:
-    """Import, build every table and run one decision now, so the first real call
-    doesn't pay for cold caches (importing has its own startup allowance)."""
+    """Import, build every table and run one decision per registered variant now, so
+    the first real call doesn't pay for cold caches or a hand-table import
+    (importing has its own startup allowance)."""
+    for variant in VARIANTS:
+        _warm_up_one(variant)
+
+
+def _warm_up_one(variant: str) -> None:
     from types import SimpleNamespace as NS
 
+    hole = {2: ("As", "Ad"), 4: ("As", "Ad", "Kh", "Qc")}.get(VARIANTS[variant]["hole_cards"], ())
     legal = (NS(kind="fold", min_amount=0, max_amount=0), NS(kind="call", min_amount=20, max_amount=20),
              NS(kind="raise", min_amount=40, max_amount=2000))
     seats = tuple(NS(seat=i, stack=2000 - (10 if i == 1 else 20 if i == 2 else 0),
                      bet=10 if i == 1 else 20 if i == 2 else 0, status="active") for i in range(8))
     events = (NS(kind="hand", seat=None, amount=1, cards=()), NS(kind="blind", seat=1, amount=10, cards=()),
               NS(kind="blind", seat=2, amount=20, cards=()))
-    state = NS(seat=3, cards=("As", "Ad"), board=(), pot=30, to_call=20, legal_actions=legal, seats=seats,
+    config = NS(variant=variant, players=8, starting_stack=2000, blinds=((10, 20, 0),), hands_per_level=20,
+                hand_cap=250, payouts=(50, 30, 20, 0, 0, 0, 0, 0))
+    state = NS(seat=3, cards=hole, board=(), pot=30, to_call=20, legal_actions=legal, seats=seats,
                button=0, blinds=(10, 20), hand_number=1, players_remaining=8, events=events,
-               phase="betting", config=NS(starting_stack=2000, payouts=PAYOUTS),
-               can=lambda k: next((a for a in legal if a.kind == k), None))
+               phase="betting", config=config, can=lambda k: next((a for a in legal if a.kind == k), None))
     try:
         decide(state, b"")
     except Exception:

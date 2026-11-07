@@ -71,6 +71,46 @@ class ActionRecord(NamedTuple):
 
 
 @dataclass(frozen=True, slots=True)
+class GameRules:
+    """Everything about the game a decision depends on, explicit and serializable.
+
+    Built by bot.rules (from the SDK config in the tournament, from the
+    TableConfig in the simulator) and validated there. Nothing in bot/ reads
+    the variant off the number of hole cards: it reads these fields.
+    """
+
+    variant: str  # the SDK's variant ID
+    # Cards
+    ranks: tuple[int, ...]  # ranks in the deck, ascending (0 = deuce .. 12 = ace)
+    suits: tuple[str, ...]  # always c, d, h, s: cards are rank * 4 + suit
+    hole_cards: int
+    hole_cards_used: int | None  # exactly this many from the hand (Omaha: 2); None = best five of all
+    preflop_board: int  # board cards face up before preflop betting (Courchevel: 1)
+    board_schedule: tuple[int, ...]  # cards dealt as each later street opens (flop, turn, river)
+    category_order: tuple[int, ...]  # hand categories (bot.rules constants), weakest first
+    ace_low_straight: bool  # the ace also plays below the lowest four ranks (A-2-3-4-5; short deck A-6-7-8-9)
+    betting: str  # "no_limit" or "pot_limit"
+    # Tournament (from each table's config)
+    payouts: tuple[float, ...]  # points by finishing place, one per seat, 1st first
+    starting_stack: int
+    blind_schedule: tuple[tuple[int, int, int], ...]  # (small, big, ante) per level; the last repeats
+    hands_per_level: int
+    hand_cap: int
+    seats: int
+
+    @property
+    def pot_limit(self) -> bool:
+        return self.betting == "pot_limit"
+
+    @property
+    def board_size(self) -> int:
+        return self.preflop_board + sum(self.board_schedule)
+
+    def deck(self) -> list[int]:
+        return [r * 4 + s for r in self.ranks for s in range(len(self.suits))]
+
+
+@dataclass(frozen=True, slots=True)
 class GameState:
     hand_number: int  # 1-based, counts hands played at this table
     seat: int  # whose decision this is
@@ -91,6 +131,7 @@ class GameState:
     players_left: int  # seats that still have chips at the table
     legal: LegalActions
     actions: tuple[ActionRecord, ...]  # this hand so far, forced posts included
+    rules: GameRules | None = None
 
 
 @dataclass(frozen=True, slots=True)

@@ -34,10 +34,9 @@ from engine.sng import play_sng
 from engine.table import CLOCK_NAME
 
 def _policy(features=None, omaha_features=None, ranks=None):
-    # No features: the submitted configuration. Either way our bot plays by the
-    # table's points, as it will once the real ones are set at kickoff.
-    return lambda seed, config: SafeBot(
-        PolicyBot(features, payouts=config.payouts, omaha_features=omaha_features, ranks=ranks))
+    # No features: the submitted configuration. Either way it plays by the rules and
+    # points each decision's state carries, built from the table config.
+    return lambda seed, config: SafeBot(PolicyBot(features, omaha_features=omaha_features, ranks=ranks))
 
 
 def _kit_seat(config):

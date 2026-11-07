@@ -35,8 +35,9 @@ BOTS = {
     "baseline": BaselineBot,
     "pushfold": PushFoldBot,
     "policy": PolicyBot,
-    "policy_all_flat": lambda: PolicyBot(FEATURES, payouts=FLAT),
+    "policy_all_flat": lambda: PolicyBot(FEATURES),  # timed on FLAT points, see PAYOUTS_FOR
 }
+PAYOUTS_FOR = {"policy_all_flat": FLAT}
 
 
 class Recorder:
@@ -62,9 +63,9 @@ class Recorder:
         return self.inner.act(state)
 
 
-def collect_states(tables, variant, make_bot):
+def collect_states(tables, variant, make_bot, payouts=None):
     states = []
-    config = TableConfig(variant=variant, enforce_time=False)
+    config = TableConfig(variant=variant, enforce_time=False, **({"payouts": payouts} if payouts else {}))
     for t in range(tables):
         bots = [Recorder(make_bot(), states) for _ in range(4)] + [
             RandomBot(t), ChenTAG(), CallingStation(), Maniac()]
@@ -100,7 +101,7 @@ def _report(label, hist):
 @pytest.mark.parametrize("variant", [NLHE, PLO], ids=lambda v: v.name)
 @pytest.mark.parametrize("name", BOTS)
 def test_safe_bot_latency(name, variant):
-    states = collect_states(40, variant, BOTS[name])
+    states = collect_states(40, variant, BOTS[name], PAYOUTS_FOR.get(name))
     cpu = []
     hist = time_decisions(SafeBot(BOTS[name]()), states, repeats=3, cpu=cpu)
     _report(f"safe {name} [{variant.name}]", hist)
@@ -112,8 +113,8 @@ def test_safe_bot_latency(name, variant):
 @pytest.mark.parametrize("gc_mode", ["default", "frozen"])
 @pytest.mark.parametrize("name", BOTS)
 def test_safe_bot_latency_at_scale(name, gc_mode):
-    states = collect_states(int(os.environ.get("TIMING_TABLES", "400")), NLHE, BOTS[name])
-    states += collect_states(100, PLO, BOTS[name])
+    states = collect_states(int(os.environ.get("TIMING_TABLES", "400")), NLHE, BOTS[name], PAYOUTS_FOR.get(name))
+    states += collect_states(100, PLO, BOTS[name], PAYOUTS_FOR.get(name))
     if gc_mode == "frozen":
         tune_gc()
     cpu = []

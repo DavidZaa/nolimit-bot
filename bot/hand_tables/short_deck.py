@@ -6,6 +6,7 @@ don't edit: python -m gen.hand_ranks --variant <variant>
 
 VARIANT = 'short_deck'
 HOLE_CARDS = 2
+CARD_RULES = {'ranks': tuple(range(4, 13)), 'hole_cards': 2, 'hole_cards_used': None, 'preflop_board': 0, 'board_schedule': (3, 1, 1), 'category_order': (0, 1, 2, 4, 3, 6, 5, 7, 8), 'ace_low_straight': True}
 PERCENTILES = {
     ((12,), (12,)): 0.00476,
     ((11,), (11,)): 0.01429,

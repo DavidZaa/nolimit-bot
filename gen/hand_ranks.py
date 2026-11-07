@@ -2,21 +2,21 @@
 
 VARIANT DAY (kickoff), in order:
 
-  1. Set the points:    PAYOUTS in bot/icm.py, 1st place first, one entry per seat.
-  2. Rank the hands:    python -m gen.hand_ranks --variant <preset or spec>
+  1. Register the rules: add the variant to VARIANTS in bot/rules.py under the
+                        exact ID the SDK reports in state.config.variant (payouts
+                        need no step: every table's config carries its own).
+  2. Rank the hands:    python -m gen.hand_ranks --variant <preset or spec> --id <SDK id>
                         (presets: nlhe, short_deck, plo; anything else as a spec,
                         e.g. "base=nlhe,hole=3" or "base=plo,hole=5", see --help).
-                        It writes bot/hand_ranks_table.py in about 4 minutes.
-                        Short deck and PLO are cached in gen/tables/, so
-                        `cp gen/tables/short_deck.py bot/hand_ranks_table.py` is instant.
-                        Plain hold'em: keep the committed table (PLO's, four cards,
-                        so hold'em hands still use Chen: measured no better or worse).
-                        A two-card table left over from a mock would replace Chen.
-                        `git checkout bot/hand_ranks_table.py` restores the default.
+                        It writes bot/hand_tables/<id>.py in about 4 minutes,
+                        stamped with the card rules it was simulated under; the
+                        bot uses it only for tables whose rules match the stamp.
+                        PLO and short deck are committed. Plain hold'em has no
+                        table on purpose (Chen measured no worse).
   3. Check it:          .venv/bin/pytest -q
   4. See it play:       python -m engine.run --variant <same> --tables 300 --workers 8 \
                             --lineup ours:2,pushfold:2,tag:2,equity,maniac
-  5. Submit build_bot() through adapter.py.
+  5. Release:           scripts/pack.sh --variant <SDK id> (refuses unregistered IDs).
 
 How it ranks: every starting-hand class (suits interchangeable, see
 bot/preflop.py) plays against one random hand on random boards, scored with
@@ -51,7 +51,7 @@ from engine.rules import NLHE, PLO, VARIANT_SPEC_HELP, parse_variant
 
 MAX_SIMULATED_HANDS = 500_000  # PLO's 270,725 starting hands simulate fine; five-card Omaha doesn't
 
-OUT = Path(__file__).resolve().parent.parent / "bot" / "hand_ranks_table.py"
+TABLES = Path(__file__).resolve().parent.parent / "bot" / "hand_tables"
 MIN_TRIALS, MAX_TRIALS = 150, 20_000
 
 
@@ -158,16 +158,26 @@ def _show(key) -> str:
                     for group in key)
 
 
-def write_table(path: Path, variant, percentiles: dict, trials: int) -> None:
+def card_rules_line(variant) -> str:
+    """The CARD_RULES stamp bot.preflop.ranks_for checks a table against."""
+    rules = {"ranks": tuple(variant.ranks), "hole_cards": variant.hole_cards,
+             "hole_cards_used": variant.hole_cards_used, "preflop_board": variant.preflop_board,
+             "board_schedule": tuple(variant.board_schedule), "category_order": tuple(variant.category_order),
+             "ace_low_straight": variant.ace_low_straight}
+    return f"CARD_RULES = {rules!r}"
+
+
+def write_table(path: Path, variant, percentiles: dict, trials: int, variant_id: str | None = None) -> None:
     lines = [
         f'"""Starting-hand percentiles for {variant.name}, written by gen/hand_ranks.py.',
         "",
         f"{len(percentiles):,} classes, {trials:,} trials each against random hands. Regenerate,",
-        'don\'t edit: python -m gen.hand_ranks --variant <variant>',
+        'don\'t edit: python -m gen.hand_ranks --variant <variant> --id <SDK id>',
         '"""',
         "",
-        f"VARIANT = {variant.name!r}",
+        f"VARIANT = {(variant_id or variant.name)!r}",
         f"HOLE_CARDS = {variant.hole_cards}",
+        card_rules_line(variant),
         "PERCENTILES = {",
     ]
     for key, p in sorted(percentiles.items(), key=lambda kv: kv[1]):
@@ -187,7 +197,7 @@ def rank_by_subsets(variant, seconds=240, workers=None, seed=0, samples=60_000, 
     sub = 4 if variant.hole_cards_used else variant.hole_cards - 1
     base = dataclasses.replace(variant, name=f"{variant.name} [{sub}-card sub-hands]", hole_cards=sub,
                                preflop_board=0, board_schedule=(variant.board_size,))
-    cached = Path(__file__).resolve().parent / "tables" / "plo.py"
+    cached = TABLES / "plo.py"
     if sub == 4 and _same_rules(base, PLO) and cached.exists():
         namespace: dict = {}
         exec(compile(cached.read_text(), str(cached), "exec"), namespace)
@@ -206,7 +216,8 @@ def rank_by_subsets(variant, seconds=240, workers=None, seed=0, samples=60_000, 
     return percentiles, sub, quantiles
 
 
-def write_subset_table(path: Path, variant, percentiles: dict, sub: int, quantiles) -> None:
+def write_subset_table(path: Path, variant, percentiles: dict, sub: int, quantiles,
+                       variant_id: str | None = None) -> None:
     lines = [
         f'"""Starting-hand ranking for {variant.name}, written by gen/hand_ranks.py.',
         "",
@@ -214,8 +225,9 @@ def write_subset_table(path: Path, variant, percentiles: dict, sub: int, quantil
         f"sub-hand, rescaled against sampled {variant.hole_cards}-card hands. Regenerate, don't edit.",
         '"""',
         "",
-        f"VARIANT = {variant.name!r}",
+        f"VARIANT = {(variant_id or variant.name)!r}",
         f"HOLE_CARDS = {variant.hole_cards}",
+        card_rules_line(variant),
         f"SUBSET = {sub}",
         f"QUANTILES = {[round(q, 5) for q in quantiles]!r}",
         "PERCENTILES = {",
@@ -233,16 +245,23 @@ def main(argv=None) -> None:
     p.add_argument("--workers", type=int, default=None)
     p.add_argument("--trials", type=int, default=None, help="fix trials per class instead of a budget")
     p.add_argument("--seed", type=int, default=0)
-    p.add_argument("--out", type=Path, default=OUT)
+    p.add_argument("--id", default=None,
+                   help="the SDK's variant ID (state.config.variant); names bot/hand_tables/<id>.py")
+    p.add_argument("--out", type=Path, default=None, help="write here instead of bot/hand_tables/<id>.py")
     args = p.parse_args(argv)
 
     v = args.variant
+    variant_id = args.id or v.name
+    if args.out is None and not variant_id.isidentifier():
+        p.error(f"{variant_id!r} can't name a table module: pass --id with the SDK's variant ID")
+    out = args.out or TABLES / f"{variant_id}.py"
     if math.comb(len(v.deck()), v.hole_cards) > MAX_SIMULATED_HANDS:
         percentiles, sub, quantiles = rank_by_subsets(v, args.seconds, args.workers, args.seed)
-        write_subset_table(args.out, v, percentiles, sub, quantiles)
+        write_subset_table(out, v, percentiles, sub, quantiles, variant_id)
     else:
         percentiles, trials = rank_hands(v, args.seconds, args.workers, args.seed, args.trials)
-        write_table(args.out, v, percentiles, trials)
+        write_table(out, v, percentiles, trials, variant_id)
+    args.out = out
     print(f"wrote {args.out}")
 
 

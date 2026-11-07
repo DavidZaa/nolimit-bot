@@ -6,6 +6,7 @@ don't edit: python -m gen.hand_ranks --variant <variant>
 
 VARIANT = 'plo'
 HOLE_CARDS = 4
+CARD_RULES = {'ranks': tuple(range(13)), 'hole_cards': 4, 'hole_cards_used': 2, 'preflop_board': 0, 'board_schedule': (3, 1, 1), 'category_order': (0, 1, 2, 3, 4, 5, 6, 7, 8), 'ace_low_straight': True}
 PERCENTILES = {
     ((12, 9), (12, 9)): 0.00001,
     ((12, 2), (12, 2)): 0.00003,

@@ -49,7 +49,7 @@ def test_through_the_protocol_it_plays_exactly_like_the_direct_bot(variant):
     cfg = TableConfig(variant=variant, enforce_time=False)
     splits, twins = [], []
     for t in range(6):
-        pair = [TrackerTwin(SafeBot(PolicyBot(payouts=cfg.payouts)), KitSeat(Agent, cfg), splits)
+        pair = [TrackerTwin(SafeBot(PolicyBot()), KitSeat(Agent, cfg), splits)
                 for _ in range(3)]
         twins += pair
         bots = pair + [ChenTAG(), EquityCaller(), Maniac(), FolderBot(), PushFold()]
@@ -121,16 +121,16 @@ def test_raises_are_whole_chips_inside_the_offered_range():
 
 def test_each_table_plays_by_its_own_payouts(monkeypatch):
     seen = []
-    original = adapter.PolicyBot
+    original = adapter.to_game_state
 
-    def spy(*a, **kw):
-        seen.append(kw["payouts"])
-        return original(*a, **kw)
+    def spy(state, log, index, rules):
+        seen.append(rules.payouts)
+        return original(state, log, index, rules)
 
-    monkeypatch.setattr(adapter, "PolicyBot", spy)
+    monkeypatch.setattr(adapter, "to_game_state", spy)
     decide(kit_state(payouts=(100,)), b"")
     decide(kit_state(payouts=(10, 9, 8, 7, 6, 5, 4, 3)), b"")
-    assert seen == [(100.0,), (10.0, 9.0, 8.0, 7.0, 6.0, 5.0, 4.0, 3.0)]
+    assert seen == [(100.0,) + (0.0,) * 7, (10.0, 9.0, 8.0, 7.0, 6.0, 5.0, 4.0, 3.0)]
 
 
 def test_the_agent_keeps_nothing_on_itself():

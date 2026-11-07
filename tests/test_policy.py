@@ -19,7 +19,7 @@ from helpers import Scripted, decisions, facing_shove
 def chen_ranking(monkeypatch):
     """These tests pin exact decisions with specific hands, so they rank hands with
     Chen whatever table is installed for the event (kickoff runs this suite)."""
-    monkeypatch.setattr("bot.policy.ACTIVE", CHEN)
+    monkeypatch.setattr("bot.policy.ranks_for", lambda rules: CHEN)
 
 
 def primed(seat, opponents, hands=30, features=FEATURES):
@@ -83,15 +83,17 @@ WTA = (100, 0, 0, 0, 0, 0, 0, 0)
 
 
 def test_on_the_bubble_icm_folds_a_hand_chip_ev_would_call_off_with():
-    with_icm = PolicyBot(FEATURES, payouts=TOP3)
-    chips_only = PolicyBot(tuple(f for f in FEATURES if f != "icm"), payouts=TOP3)
-    assert facing_shove(chips_only, 2, "KcQh", shover=0, stacks=BUBBLE) == Action(CALL)
-    assert facing_shove(with_icm, 2, "KcQh", shover=0, stacks=BUBBLE) == Action(FOLD)
-    assert facing_shove(with_icm, 2, "AcQd", shover=0, stacks=BUBBLE) == Action(CALL)
+    with_icm = PolicyBot(FEATURES)
+    chips_only = PolicyBot(tuple(f for f in FEATURES if f != "icm"))
+    top3 = TableConfig(payouts=TOP3)
+    assert facing_shove(chips_only, 2, "KcQh", shover=0, stacks=BUBBLE, config=top3) == Action(CALL)
+    assert facing_shove(with_icm, 2, "KcQh", shover=0, stacks=BUBBLE, config=top3) == Action(FOLD)
+    assert facing_shove(with_icm, 2, "AcQd", shover=0, stacks=BUBBLE, config=top3) == Action(CALL)
 
 
 def test_winner_take_all_leaves_the_icm_feature_with_nothing_to_do():
-    assert facing_shove(PolicyBot(FEATURES, payouts=WTA), 2, "KcQh", shover=0, stacks=BUBBLE) == Action(CALL)
+    wta = TableConfig(payouts=WTA)
+    assert facing_shove(PolicyBot(FEATURES), 2, "KcQh", shover=0, stacks=BUBBLE, config=wta) == Action(CALL)
 
 
 @pytest.mark.parametrize("variant", [NLHE, PLO], ids=lambda v: v.name)
@@ -99,13 +101,13 @@ def test_with_winner_take_all_points_icm_changes_no_decision(variant):
     states = []
     config = TableConfig(variant=variant, enforce_time=False, payouts=WTA)
     for t in range(10):
-        bots = [Recorder(PolicyBot(FEATURES, payouts=WTA), states) for _ in range(3)] + [
+        bots = [Recorder(PolicyBot(FEATURES), states) for _ in range(3)] + [
             ChenTAG(), EquityCaller(), CallingStation(), Maniac(), RandomBot(t)]
         play_sng(bots, config, seed=t)
     without = tuple(f for f in FEATURES if f != "icm")
     for st in states:
         # Fresh bots each time: trackers start from the priors in both.
-        assert PolicyBot(FEATURES, payouts=WTA).act(st) == PolicyBot(without, payouts=WTA).act(st)
+        assert PolicyBot(FEATURES).act(st) == PolicyBot(without).act(st)
 
 
 class Twin:

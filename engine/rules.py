@@ -7,17 +7,15 @@ PLACEHOLDER(kit): the starter kit on event day replaces those values.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from functools import lru_cache
 
 from bot.icm import PAYOUTS
-
-# Hand categories. The numbers are identities, not strengths: a variant's
-# category_order decides which beats which.
-HIGH_CARD, PAIR, TWO_PAIR, TRIPS, STRAIGHT, FLUSH, FULL_HOUSE, QUADS, STRAIGHT_FLUSH = range(9)
-CATEGORY_NAMES = (
-    "high card", "pair", "two pair", "trips", "straight",
-    "flush", "full house", "quads", "straight flush",
+# Hand categories live with the bot's rules so the simulator and the bot share one definition.
+from bot.rules import (  # noqa: F401  (re-exported for engine code and tests)
+    CATEGORY_NAMES, FLUSH, FULL_HOUSE, HIGH_CARD, PAIR, QUADS, SHORT_DECK_ORDER, STANDARD_ORDER, STRAIGHT,
+    STRAIGHT_FLUSH, SUITS, TRIPS, TWO_PAIR, check_card_rules, check_table_rules,
 )
-STANDARD_ORDER = (HIGH_CARD, PAIR, TWO_PAIR, TRIPS, STRAIGHT, FLUSH, FULL_HOUSE, QUADS, STRAIGHT_FLUSH)
+from bot.state import GameRules
 
 
 @dataclass(frozen=True)
@@ -30,6 +28,7 @@ class Variant:
     hole_cards_used: int | None = None  # None: best five of all cards; 2: Omaha
     pot_limit: bool = False
     preflop_board: int = 0  # board cards dealt face up before preflop betting (Courchevel: 1)
+    ace_low_straight: bool = True  # the ace also plays below the lowest four ranks
 
     @property
     def board_size(self) -> int:
@@ -42,11 +41,7 @@ class Variant:
 NLHE = Variant("nlhe")
 # Triton-style short deck: 6-A, flush beats full house, trips beat straight.
 # PLACEHOLDER(kit): some rule sets (PokerKit's included) keep straight > trips.
-SHORT_DECK = Variant(
-    "short_deck",
-    ranks=tuple(range(4, 13)),
-    category_order=(HIGH_CARD, PAIR, TWO_PAIR, STRAIGHT, TRIPS, FULL_HOUSE, FLUSH, QUADS, STRAIGHT_FLUSH),
-)
+SHORT_DECK = Variant("short_deck", ranks=tuple(range(4, 13)), category_order=SHORT_DECK_ORDER)
 PLO = Variant("plo", hole_cards=4, hole_cards_used=2, pot_limit=True)
 VARIANTS = {v.name: v for v in (NLHE, SHORT_DECK, PLO)}
 
@@ -173,3 +168,18 @@ class TableConfig:
         needed = self.seats * v.hole_cards + v.board_size
         if needed > len(v.deck()):
             raise ValueError(f"{v.name}: {self.seats} seats need {needed} cards, the deck has {len(v.deck())}")
+
+
+@lru_cache(maxsize=64)
+def game_rules(config: TableConfig) -> GameRules:
+    """The GameRules every simulated decision carries: the bot's own type, validated by
+    the bot's own checks, so a simulator run exercises exactly what the SDK path builds."""
+    v = config.variant
+    card = check_card_rules(dict(
+        ranks=v.ranks, suits=SUITS, hole_cards=v.hole_cards, hole_cards_used=v.hole_cards_used,
+        preflop_board=v.preflop_board, board_schedule=v.board_schedule, category_order=v.category_order,
+        ace_low_straight=v.ace_low_straight, betting="pot_limit" if v.pot_limit else "no_limit"))
+    table = check_table_rules(dict(
+        payouts=config.payouts, starting_stack=config.starting_stack, blind_schedule=config.schedule.levels,
+        hands_per_level=config.schedule.hands_per_level, hand_cap=config.max_hands, seats=config.seats))
+    return GameRules(variant=v.name, **card, **table)

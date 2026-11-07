@@ -15,6 +15,7 @@ import pytest
 from bot.baseline import BaselineBot, preflop_percentile
 from bot.policy import PolicyBot
 from bot.pushfold import PushFoldBot
+from bot.rules import RulesError
 from bot.safety import SafeBot, make_legal
 from bot.state import (
     CALL,
@@ -27,7 +28,7 @@ from bot.state import (
     cards_from_str,
 )
 from engine.field import CallingStation, FolderBot, Maniac, RandomBot
-from engine.rules import NLHE, PLO, SHORT_DECK, TableConfig
+from engine.rules import NLHE, PLO, SHORT_DECK, TableConfig, game_rules
 from engine.sng import play_sng
 from engine.table import is_legal
 
@@ -181,8 +182,13 @@ def random_state(rng):
         ante=rng.choice((0, bb // 10)), street=rng.randint(0, 3), hole=hole, board=board,
         stacks=stacks, bets=bets, pot=rng.randint(0, 100_000),
         in_hand=tuple(rng.random() < 0.7 for _ in range(n)), players_left=rng.randint(1, n),
-        legal=legal, actions=(),
+        legal=legal, actions=(), rules=rng.choice(FUZZ_RULES),
     )
+
+
+# Every registered variant's rules (the hole cards needn't match: these states are junk on purpose),
+# and no rules at all, which the policy must refuse rather than guess.
+FUZZ_RULES = [game_rules(TableConfig(variant=v)) for v in (NLHE, SHORT_DECK, PLO)] + [None]
 
 
 def _fuzz_states(count, seed):
@@ -192,9 +198,13 @@ def _fuzz_states(count, seed):
     safe = [SafeBot(BaselineBot()), SafeBot(PushFoldBot()), SafeBot(PolicyBot())]
     for _ in range(count):
         st = random_state(rng)
-        # our raw bots may misjudge junk states, but must never crash
+        # our raw bots may misjudge junk states, but must never crash, except that the
+        # policy refuses a state without rules
         for bot in raw:
-            bot.act(st)
+            try:
+                bot.act(st)
+            except RulesError:
+                assert st.rules is None and isinstance(bot, PolicyBot)
         for bot in safe:
             assert is_legal(bot.act(st), st.legal)
         bot = wrapped[rng.randrange(len(wrapped))]

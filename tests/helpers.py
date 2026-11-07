@@ -36,10 +36,11 @@ class ReturnsJunk:
         return self.value
 
 
-def decisions(bot, seat, hole, board, stacks=None, others=None):
+def decisions(bot, seat, hole, board, stacks=None, others=None, config=None):
     """Play one hand (button 0, blinds 10/20) with `bot` at `seat`; return its (state, action)s.
 
     Everyone else folds unless given in `others`; they get low filler cards.
+    `config` sets the variant and points (default: TableConfig()).
     """
     stacks = stacks or [2000] * 8
     seen = []
@@ -57,7 +58,7 @@ def decisions(bot, seat, hole, board, stacks=None, others=None):
     mine, shared = cards_from_str(hole), cards_from_str(board)
     spare = iter(c for c in range(52) if c not in mine + shared)
     holes = {s: mine if s == seat else (next(spare), next(spare)) for s in range(8) if stacks[s] > 0}
-    play_hand(bots, stacks, 0, 1, TableConfig(), random.Random(0), holes=holes, board=shared)
+    play_hand(bots, stacks, 0, 1, config or TableConfig(), random.Random(0), holes=holes, board=shared)
     return seen
 
 
@@ -65,10 +66,10 @@ def first_action(*args, **kw):
     return decisions(*args, **kw)[0][1]
 
 
-def facing_shove(bot, seat, hole, shover=3, stacks=None):
+def facing_shove(bot, seat, hole, shover=3, stacks=None, config=None):
     """`bot`'s answer when `shover` moves all-in first. Builds a fresh shover each call."""
     stacks = stacks or [2000] * 8
-    state, action = decisions(bot, seat, hole, "Kh7s2dJc4h", stacks=stacks,
+    state, action = decisions(bot, seat, hole, "Kh7s2dJc4h", stacks=stacks, config=config,
                               others={shover: Scripted(Action(RAISE, stacks[shover]))})[0]
     assert max(state.bets) == stacks[shover]  # it really was facing the shove
     return action

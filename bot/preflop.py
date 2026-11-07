@@ -6,9 +6,16 @@ another, and the same key covers hold'em (169 classes), short deck and
 Omaha (16,432).
 
 gen/hand_ranks.py simulates every class against random hands and writes
-bot/hand_ranks_table.py: a percentile per class ("top x% of starting
-hands"), the same scale the Chen ranking in bot.baseline uses. The bot uses
-that table when it has one for its hole-card count, and Chen otherwise.
+bot/hand_tables/<variant id>.py: a percentile per class ("top x% of starting
+hands"), the same scale the Chen ranking in bot.baseline uses, stamped with
+the card rules it was simulated under.
+
+ranks_for(rules) picks the table: the one named after the table's variant ID,
+used only if its stamped card rules equal the table's (deck, hole cards,
+Omaha usage, board, category order, ace rule). With no matching table it's
+Chen: exact for two-card hands, the best two cards for bigger ones (an
+approximation; pack.sh reports which a release uses). Plain hold'em has no
+table on purpose: simulated rankings measured no better than Chen there.
 
 Five-card Omaha has too many classes (about 134,000) to simulate at kickoff,
 so its table works through sub-hands: a hand is judged by its best
@@ -19,6 +26,8 @@ five-card hands so the result is still a share of five-card hands.
 from __future__ import annotations
 
 from bisect import bisect_left
+from functools import lru_cache
+from importlib import import_module
 from itertools import combinations
 
 from bot.baseline import preflop_percentile as chen_percentile
@@ -44,12 +53,7 @@ class HandRanks:
         self.quantiles = quantiles
 
     @classmethod
-    def load(cls) -> "HandRanks":
-        """The generated table if there is one, else Chen everywhere."""
-        try:
-            from bot import hand_ranks_table as t
-        except ImportError:
-            return cls()
+    def from_module(cls, t) -> "HandRanks":
         return cls(t.PERCENTILES, t.HOLE_CARDS, t.VARIANT,
                    getattr(t, "SUBSET", None), getattr(t, "QUANTILES", None))
 
@@ -67,5 +71,42 @@ class HandRanks:
         return chen_percentile(hole)
 
 
-ACTIVE = HandRanks.load()
 CHEN = HandRanks()
+
+# The card rules a table depends on (betting structure and payouts don't change equities).
+TABLE_RULES = ("ranks", "hole_cards", "hole_cards_used", "preflop_board", "board_schedule",
+               "category_order", "ace_low_straight")
+
+
+def card_fingerprint(rules) -> tuple:
+    get = rules.get if isinstance(rules, dict) else lambda k: getattr(rules, k)
+    return tuple(tuple(v) if isinstance(v, (list, tuple)) else v for v in (get(k) for k in TABLE_RULES))
+
+
+def _table_module(variant: str):
+    if not variant.isidentifier() or variant.startswith("_"):
+        return None
+    try:
+        return import_module(f"bot.hand_tables.{variant}")
+    except ImportError:
+        return None
+
+
+@lru_cache(maxsize=32)
+def _ranks(variant: str, fingerprint: tuple) -> tuple[HandRanks, str]:
+    t = _table_module(variant)
+    if t is None:
+        return CHEN, f"no table for {variant!r}: Chen ranking"
+    if card_fingerprint(getattr(t, "CARD_RULES", {k: None for k in TABLE_RULES})) != fingerprint:
+        return CHEN, f"bot/hand_tables/{variant}.py was made for other card rules: Chen ranking"
+    return HandRanks.from_module(t), f"bot/hand_tables/{variant}.py"
+
+
+def ranks_for(rules) -> HandRanks:
+    """The starting-hand ranking for these rules (see the module docstring)."""
+    return _ranks(rules.variant, card_fingerprint(rules))[0]
+
+
+def table_status(rules) -> str:
+    """Which ranking ranks_for(rules) uses, in words (for release checks)."""
+    return _ranks(rules.variant, card_fingerprint(rules))[1]
