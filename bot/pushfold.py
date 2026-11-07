@@ -58,18 +58,19 @@ CAL_CALL_STACK = 0.10
 # cal_tuned (build flag): opens measured under target with CAL_OPEN, and folds to a raise
 # well under it, so wider open shares and narrower call shares.
 TUNED_OPEN = {"button": 0.65, "cutoff": 0.45, "sb": 0.70}
-TUNED_LATE_CALL, TUNED_EARLY_CALL, TUNED_EARLY_3BET = 0.25, 0.20, 0.04
+TUNED_LATE_CALL, TUNED_EARLY_CALL, TUNED_EARLY_3BET = 0.25, 0.10, 0.025  # early raisers: unchanged
 TUNED_CALL_STACK, TUNED_CALL_BB, TUNED_SB_STEAL_BB = 0.15, 4, 40  # no any-two SB steal at 40+ BB
 # resteal (build flag): late openers fold to re-raises 73% of the time (real data). Facing one
 # non-all-in late raise: re-raise 3x with the top RESTEAL_TOP over 25 BB, re-shove it at
 # 15-25 BB; only the top RESTEAL_STICKY vs a seat folding under 55% to re-raises (5+ seen);
 # continue against a 4-bet only with the top RESTEAL_4BET.
 RESTEAL_TOP, RESTEAL_STICKY, RESTEAL_4BET = 0.25, 0.10, 0.05
+FIGHT_BB, FIGHT_SHARE = 30, 0.40  # re-raised after our open at <= 30 BB: shove the top 40% of the open range
 # bubble (build flag): with 4-5 left and our stack covering everyone still to act, pressure.
 BUBBLE_PLAYERS = (4, 5)
 BUBBLE_EARLY_OPEN, BUBBLE_SHOVE = 0.50, 0.50
 HU_DEPTH_BB = 20
-HU_OPEN, HU_CALL = 0.70, 0.40
+HU_OPEN, HU_CALL = 0.70, 0.50
 DEEP_CALL = 0.08  # top share that flats a cheap raise when deep
 
 
@@ -180,10 +181,17 @@ class PushFoldBot:
         if pct <= self._resteal_range(state, depth) and not too_deep:
             return commit(legal)
 
-        if calibrated and flag("resteal", "off") == "on" and depth >= 15 and len(
-                [r for r in state.actions if r.street == 0 and r.kind == RAISE]) == 2 and \
-                any(r.seat == seat for r in state.actions if r.street == 0 and r.kind == RAISE):
-            return commit(legal) if pct <= RESTEAL_4BET else check_or(legal, call=False)  # our 3-bet got 4-bet
+        pre_raises = [r.seat for r in state.actions if r.street == 0 and r.kind == RAISE]
+        if calibrated and flag("resteal", "off") == "on" and seat in pre_raises and depth >= 15:
+            if len(pre_raises) == 2 and pre_raises[0] == seat and depth <= FIGHT_BB:  # our open got re-raised
+                position = "button" if seat == state.button else "sb" if seat == state.sb_seat else (
+                    "cutoff" if seat == cutoff else None)
+                share = FIGHT_SHARE * (open_shares[position] if position else 0.45 / 3 ** 0.8)
+                return commit(legal) if pct <= share else check_or(legal, call=False)
+            if len(pre_raises) >= 3 and pre_raises[-2] == seat:  # our 3-bet got 4-bet
+                return commit(legal) if pct <= RESTEAL_4BET else check_or(legal, call=False)
+            if state.players_left == 2:  # heads-up: never flat-call a re-raise of our own open
+                return commit(legal) if pct <= RESTEAL_4BET else check_or(legal, call=False)
         if calibrated and self._single_raise(state) is not None:
             raiser = self._single_raise(state)
             from_late = raiser in (state.button, state.sb_seat, cutoff)
