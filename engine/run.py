@@ -18,7 +18,11 @@ import sys
 from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass, field
 
+from functools import lru_cache
+
 from bot.baseline import BaselineBot
+from bot.handeval import warm as warm_evaluator
+from bot.preflop import ranks_for
 from bot.policy import FEATURES, V4_FEATURES, V5_FEATURES, V6_FEATURES, PolicyBot
 from bot.preflop import CHEN
 from bot.pushfold import PushFoldBot
@@ -27,16 +31,29 @@ from engine.field import CallingStation, ChenTAG, EquityCaller, FolderBot, Mania
 from engine.field_llm import llm1_strong, llm2_tag, llm3_montecarlo, llm4_pushfold
 from engine.latency import LatencyHistogram
 from engine.rules import (
-    DEFAULT_PAYOUTS, NLHE, SCHEDULE_SPEC_HELP, VARIANT_SPEC_HELP, TableConfig, parse_schedule,
+    DEFAULT_PAYOUTS, NLHE, SCHEDULE_SPEC_HELP, VARIANT_SPEC_HELP, TableConfig, game_rules, parse_schedule,
     parse_variant,
 )
 from engine.sng import play_sng
 from engine.table import CLOCK_NAME
 
+@lru_cache(maxsize=None)
+def _warm(config: TableConfig) -> None:
+    """What the agent does at import, once per config and process: build the evaluator's
+    tables and load the starting-hand table, so no simulated decision pays for it (a cold
+    first postflop decision costs ~10-20 ms and would count as a timeout)."""
+    rules = game_rules(config)
+    warm_evaluator(rules)
+    ranks_for(rules)
+
+
 def _policy(features=None, omaha_features=None, ranks=None):
     # No features: the submitted configuration. Either way it plays by the rules and
     # points each decision's state carries, built from the table config.
-    return lambda seed, config: SafeBot(PolicyBot(features, omaha_features=omaha_features, ranks=ranks))
+    def make(seed, config):
+        _warm(config)
+        return SafeBot(PolicyBot(features, omaha_features=omaha_features, ranks=ranks))
+    return make
 
 
 def _kit_seat(config):
@@ -54,7 +71,7 @@ BOTS = {
     "v5": _policy(V5_FEATURES, omaha_features=V4_FEATURES),
     "v6": _policy(V6_FEATURES, omaha_features=V4_FEATURES),  # v5 + defend, on trial
     "v4": _policy(V4_FEATURES),
-    "v3": lambda seed, config: SafeBot(PushFoldBot()),
+    "v3": lambda seed, config: _warm(config) or SafeBot(PushFoldBot()),
     "baseline": lambda seed, config: SafeBot(BaselineBot()),
     "baseline_raw": lambda seed, config: BaselineBot(),
     "random": lambda seed, config: RandomBot(seed),
