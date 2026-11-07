@@ -51,6 +51,13 @@ VARIANTS: dict[str, dict] = {
     "plo": dict(ranks=tuple(range(13)), suits=SUITS, hole_cards=4, hole_cards_used=2,
                 preflop_board=0, board_schedule=(3, 1, 1), category_order=STANDARD_ORDER,
                 ace_low_straight=True, betting="pot_limit"),
+    # The announced variant (2026-11-06). PLACEHOLDER(kit): the ID is ours; adapter.py maps
+    # the SDK's ID onto it (VARIANT_ALIASES). Three hole cards; on the flop each player
+    # discards one and exposes one of the two kept; then hold'em with two hole cards, best
+    # five of all. When exactly the discard/expose happen is the kit's business (adapter).
+    "three_card_discard": dict(ranks=tuple(range(13)), suits=SUITS, hole_cards=3, hole_cards_used=ANY_FIVE,
+                               preflop_board=0, board_schedule=(3, 1, 1), category_order=STANDARD_ORDER,
+                               ace_low_straight=True, betting="no_limit", discards=1, exposes=1),
 }
 
 CARD_FIELDS = ("ranks", "suits", "hole_cards", "hole_cards_used", "preflop_board", "board_schedule",
@@ -127,8 +134,15 @@ def check_card_rules(fields: dict) -> dict:
     betting = fields["betting"]
     if betting not in BETTING:
         raise RulesError(f"unsupported betting structure {betting!r}; supported: {BETTING}")
+    discards = _int(fields.get("discards", 0), "discards")
+    exposes = _int(fields.get("exposes", 0), "exposes")
+    if discards >= hole or exposes > hole - discards:
+        raise RulesError(f"can't discard {discards} and expose {exposes} of {hole} hole cards")
+    if used is None and hole - discards + board < 5:
+        raise RulesError(f"{hole - discards} kept hole cards and a {board}-card board can't make five")
     return dict(ranks=ranks, suits=suits, hole_cards=hole, hole_cards_used=used, preflop_board=preflop_board,
-                board_schedule=schedule, category_order=order, ace_low_straight=ace_low, betting=betting)
+                board_schedule=schedule, category_order=order, ace_low_straight=ace_low, betting=betting,
+                discards=discards, exposes=exposes)
 
 
 def check_table_rules(fields: dict) -> dict:
@@ -284,10 +298,11 @@ def _lenient(raw, hole: int, betting_hint: str, seats_seen: int, current_level):
     try:
         card = card_rules(variant)
     except RulesError:
-        # 4+ hole cards: PLO-style (exactly two from the hand); fewer: hold'em-style.
-        base = "plo" if hole >= 4 else "nlhe"
+        # 3 hole cards: the announced discard variant; 4+: PLO-style (exactly two from the
+        # hand); fewer: hold'em-style.
+        base = "three_card_discard" if hole == 3 else "plo" if hole >= 4 else "nlhe"
         fields = dict(VARIANTS[base])
-        if hole:
+        if hole and base != "three_card_discard":
             fields["hole_cards"] = hole
         if betting_hint:
             fields["betting"] = betting_hint
@@ -335,11 +350,27 @@ def _short(value) -> str:
     return text if len(text) <= 60 else text[:57] + "..."
 
 
-def rules_from_state(state, strict: bool | None = None) -> tuple[GameRules, tuple[str, ...]]:
+class _Aliased:
+    """The SDK config with its variant ID mapped onto a registered one."""
+
+    def __init__(self, cfg, variant):
+        self._cfg, self.variant = cfg, variant
+
+    def __getattr__(self, name):
+        return getattr(self._cfg, name)
+
+
+def rules_from_state(state, strict: bool | None = None, aliases: dict | None = None
+                     ) -> tuple[GameRules, tuple[str, ...]]:
     """(rules, warnings) for a decision. The strict rules when the config is complete and
     registered; otherwise (unless NLB_STRICT=1) the best rules the config and the state
-    allow, with one warning per guess. Raises RulesError only when nothing usable is left."""
+    allow, with one warning per guess. Raises RulesError only when nothing usable is left.
+    `aliases` maps SDK variant IDs onto registered ones (adapter.VARIANT_ALIASES)."""
     cfg = getattr(state, "config", None)
+    if aliases and cfg is not None:
+        sdk_id = getattr(cfg, "variant", None)
+        if isinstance(sdk_id, str) and sdk_id in aliases:
+            cfg = _Aliased(cfg, aliases[sdk_id])
     if strict is None:
         strict = strict_mode()
     if not strict:  # a config already known to need guessing skips the failing strict pass

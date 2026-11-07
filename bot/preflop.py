@@ -75,11 +75,14 @@ CHEN = HandRanks()
 
 # The card rules a table depends on (betting structure and payouts don't change equities).
 TABLE_RULES = ("ranks", "hole_cards", "hole_cards_used", "preflop_board", "board_schedule",
-               "category_order", "ace_low_straight")
+               "category_order", "ace_low_straight", "discards")
 
 
 def card_fingerprint(rules) -> tuple:
-    get = rules.get if isinstance(rules, dict) else lambda k: getattr(rules, k)
+    if isinstance(rules, dict):
+        get = lambda k: rules.get(k, 0 if k == "discards" else None)  # noqa: E731  (older stamps)
+    else:
+        get = lambda k: getattr(rules, k)  # noqa: E731
     return tuple(tuple(v) if isinstance(v, (list, tuple)) else v for v in (get(k) for k in TABLE_RULES))
 
 

@@ -320,3 +320,34 @@ def test_nothing_in_bot_imports_simulator_code():
                          "against a real state.config (variant ID, blinds shape, payouts) then")
 def test_translation_against_the_official_sdk():
     pass
+
+
+# -- the announced three-card discard variant ---------------------------------------------------
+
+def test_the_discard_variant_is_registered_with_its_card_rules():
+    card = R.card_rules("three_card_discard")
+    assert (card["hole_cards"], card["discards"], card["exposes"]) == (3, 1, 1)
+    assert card["hole_cards_used"] is None and card["betting"] == "no_limit"
+    assert all(R.card_rules(v)["discards"] == 0 for v in ("nlhe", "plo", "short_deck"))
+
+
+def test_an_unknown_variant_with_three_hole_cards_is_the_discard_variant(monkeypatch, capsys):
+    monkeypatch.delenv("NLB_STRICT", raising=False)
+    adapter._reported.clear()
+    state = kit_state(Bare(**dict(FULL, variant="announced_but_unknown")), cards=("As", "Ad", "Kh"))
+    rules, warnings = R.rules_from_state(state)
+    assert (rules.hole_cards, rules.discards, rules.exposes) == (3, 1, 1)
+    assert rules.variant == "announced_but_unknown" and "three_card_discard" in warnings[0]
+    assert decide(state, b"")[0].kind == "raise"  # aces facing a raise: the strategy, not a fold
+    assert "RULES WARNING" in capsys.readouterr().err
+
+
+def test_the_sdk_id_maps_onto_the_registered_variant_without_warnings(monkeypatch):
+    monkeypatch.delenv("NLB_STRICT", raising=False)
+    monkeypatch.setitem(adapter.VARIANT_ALIASES, "sdk_says_this", "three_card_discard")
+    state = kit_state(Bare(**dict(FULL, variant="sdk_says_this")), cards=("As", "Ad", "Kh"))
+    rules, warnings = R.rules_from_state(state, aliases=adapter.VARIANT_ALIASES)
+    assert warnings == () and rules.discards == 1
+    monkeypatch.setenv("NLB_STRICT", "1")  # registered through the alias: strict mode is fine too
+    assert R.rules_from_state(state, aliases=adapter.VARIANT_ALIASES)[0].discards == 1
+    assert decide(state, b"")[0].kind == "raise"

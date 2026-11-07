@@ -101,6 +101,9 @@ class GameRules:
     hands_per_level: int
     hand_cap: int
     seats: int
+    # Draw-style variants (card rules, after the tournament fields only for dataclass order):
+    discards: int = 0  # hole cards each player discards on the flop (the announced variant: 1)
+    exposes: int = 0  # kept hole cards each player then shows face up (announced: 1)
 
     @property
     def pot_limit(self) -> bool:

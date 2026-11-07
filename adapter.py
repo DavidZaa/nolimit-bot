@@ -56,6 +56,20 @@ from bot.state import (  # noqa: E402
 )
 from bot.tracker import Tracker  # noqa: E402
 
+# -- PLACEHOLDER(kit): everything the announced variant's SDK details decide -------------
+# The variant was announced before its kit: 3 hole cards; on the flop each player discards
+# one and exposes one of the two kept. Strategy (bot/discard.py, bot/expose.py) never sees
+# these names; only this block and to_card_action do. Fill them in from the real SDK.
+VARIANT_ALIASES = {"three_card_discard": "three_card_discard"}  # SDK variant ID -> bot.rules.VARIANTS
+DISCARD_KINDS = ("discard",)  # legal action kinds (substrings) that ask for a discard
+EXPOSE_KINDS = ("expose",)  # ... that ask for a card to show
+DISCARD_PHASES = ("discard",)  # state.phase values (substrings) for the discard
+EXPOSE_PHASES = ("expose",)  # ... for the expose
+EXPOSE_EVENT_KINDS = ("expose",)  # event kinds that carry a seat's exposed card in .cards
+CARD_CHOICE = "index"  # how an action names its card: "index" (position in state.cards, as the
+#                        amount), "string" ("As" as the amount) or "legal" (pick the offered
+#                        LegalAction carrying that card)
+
 MEMORY_VERSION = 1
 MEMORY_BUDGET = 16_000  # bytes; the kit allows 64 KB but anything past ~16 KB costs decision time
 IN_HAND = ("active", "all_in")
@@ -227,7 +241,7 @@ def decide(state, memory: bytes):
         if getattr(state, "phase", "betting") != "betting" or not any(
                 state.can(k) for k in ("fold", "check", "call", "raise")):
             return automatic(state), new_memory
-        rules, warnings = rules_from_state(state)
+        rules, warnings = rules_from_state(state, aliases=VARIANT_ALIASES)
         for warning in warnings:
             _report_once(f"RULES WARNING (playing on a guess): {warning}")
         policy = PolicyBot()
@@ -279,7 +293,8 @@ def _warm_up() -> None:
 def _warm_up_one(variant: str) -> None:
     from types import SimpleNamespace as NS
 
-    hole = {2: ("As", "Ad"), 4: ("As", "Ad", "Kh", "Qc")}.get(VARIANTS[variant]["hole_cards"], ())
+    hole = {2: ("As", "Ad"), 3: ("As", "Ad", "Kh"), 4: ("As", "Ad", "Kh", "Qc")}.get(
+        VARIANTS[variant]["hole_cards"], ())
     legal = (NS(kind="fold", min_amount=0, max_amount=0), NS(kind="call", min_amount=20, max_amount=20),
              NS(kind="raise", min_amount=40, max_amount=2000))
     seats = tuple(NS(seat=i, stack=2000 - (10 if i == 1 else 20 if i == 2 else 0),
