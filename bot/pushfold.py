@@ -55,6 +55,14 @@ CAL_OPEN = {"button": 0.60, "cutoff": 0.45, "sb": 0.70}
 CAL_LATE_3BET, CAL_LATE_CALL = 0.08, 0.25  # vs a cutoff/button/small-blind raise
 CAL_EARLY_3BET, CAL_EARLY_CALL = 0.025, 0.10  # vs an earlier raise
 CAL_CALL_STACK = 0.10
+# cal_tuned (build flag): opens measured under target with CAL_OPEN, and folds to a raise
+# well under it, so wider open shares and narrower call shares.
+TUNED_OPEN = {"button": 0.65, "cutoff": 0.45, "sb": 0.70}
+TUNED_LATE_CALL, TUNED_EARLY_CALL, TUNED_EARLY_3BET = 0.25, 0.20, 0.04
+TUNED_CALL_STACK, TUNED_CALL_BB, TUNED_SB_STEAL_BB = 0.15, 4, 40  # no any-two SB steal at 40+ BB
+# bubble (build flag): with 4-5 left and our stack covering everyone still to act, pressure.
+BUBBLE_PLAYERS = (4, 5)
+BUBBLE_EARLY_OPEN, BUBBLE_SHOVE = 0.50, 0.50
 HU_DEPTH_BB = 20
 HU_OPEN, HU_CALL = 0.70, 0.40
 DEEP_CALL = 0.08  # top share that flats a cheap raise when deep
@@ -114,6 +122,15 @@ class PushFoldBot:
         n = len(state.stacks)
         cutoff = next((s for i in range(1, n) for s in [(state.button - i) % n]
                        if state.in_hand[s] or state.stacks[s] > 0), None)
+        tuned = calibrated and flag("cal_tuned", "off") == "on"
+        open_shares = TUNED_OPEN if tuned else CAL_OPEN
+        bubble = (getattr(state.rules, "discards", 0) and flag("bubble", "off") == "on"
+                  and state.players_left in BUBBLE_PLAYERS)
+        if bubble:
+            behind_all = seats_behind(state, seat)
+            mine = state.stacks[seat] + state.bets[seat]
+            covers = all(state.stacks[s] + state.bets[s] <= mine for s in behind_all)
+            bubble = covers and bool(behind_all)
 
         if highest <= bb:
             if heads_up and seat == state.sb_seat:
@@ -127,14 +144,22 @@ class PushFoldBot:
             elif late and seat == state.sb_seat:
                 widen *= LATE_SB_WIDEN
             if depth <= SHOVE_DEPTH_BB:
+                if bubble and pct <= BUBBLE_SHOVE:
+                    return commit(legal)
                 if pct <= shove_range(depth, len(behind)) * widen / self._shove_tightness(state, behind):
                     return commit(legal)
+                return check_or(legal, call=False)
+            if bubble and depth > SHOVE_DEPTH_BB:
+                late_seat = seat in (state.button, state.sb_seat, cutoff)
+                if late_seat or pct <= BUBBLE_EARLY_OPEN:
+                    return raise_to(legal, OPEN_TO_BB * bb)
                 return check_or(legal, call=False)
             if calibrated:
                 position = "button" if seat == state.button else "sb" if seat == state.sb_seat else (
                     "cutoff" if seat == cutoff else None)
                 if position is not None:
-                    if pct <= CAL_OPEN[position] or widen == float("inf"):
+                    steal = widen == float("inf") and not (tuned and position == "sb" and depth >= TUNED_SB_STEAL_BB)
+                    if pct <= open_shares[position] or steal:
                         return raise_to(legal, OPEN_TO_BB * bb)
                     return check_or(legal, call=False)
             if pct <= 0.45 / max(len(behind), 1) ** 0.8 * widen:
@@ -153,10 +178,15 @@ class PushFoldBot:
         if calibrated and self._single_raise(state) is not None:
             raiser = self._single_raise(state)
             from_late = raiser in (state.button, state.sb_seat, cutoff)
-            three_bet, call_share = (CAL_LATE_3BET, CAL_LATE_CALL) if from_late else (CAL_EARLY_3BET, CAL_EARLY_CALL)
+            late_call, early_call = (TUNED_LATE_CALL, TUNED_EARLY_CALL) if tuned else (CAL_LATE_CALL, CAL_EARLY_CALL)
+            early_3bet = TUNED_EARLY_3BET if tuned else CAL_EARLY_3BET
+            three_bet, call_share = (CAL_LATE_3BET, late_call) if from_late else (early_3bet, early_call)
             if pct <= three_bet:
                 return commit(legal) if depth <= LATE_SHOVE_BB else raise_to(legal, 3 * highest)
-            if pct <= call_share and legal.call_amount <= CAL_CALL_STACK * (state.stacks[seat] + state.bets[seat]):
+            affordable = (legal.call_amount <= TUNED_CALL_STACK * (state.stacks[seat] + state.bets[seat])
+                          and highest <= TUNED_CALL_BB * bb) if tuned else (
+                legal.call_amount <= CAL_CALL_STACK * (state.stacks[seat] + state.bets[seat]))
+            if pct <= call_share and affordable:
                 return Action(CALL) if legal.can_call else check_or(legal, call=False)
             return check_or(legal, call=False)
 
