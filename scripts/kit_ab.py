@@ -46,6 +46,8 @@ def build(spec: str, base: Path, work: Path) -> tuple[str, Path]:
 opens: dict = {}  # label -> non-all-in first-in open sizes in big blinds
 flops: dict = {}  # label -> hands in which the seat saw the flop
 reraises: dict = {}  # label -> [opens that got re-raised, folds to it]
+river: dict = {}  # label -> facing a river bet: fold/call/raise counts
+flopbets: dict = {}  # label -> exposed pairs flop? -> [responses to its flop bet, folds]
 positions: dict = {}  # label -> position -> [hands there, first-in raises there]
 
 
@@ -77,12 +79,36 @@ def table_points(history: Path, styles: dict | None = None) -> list[dict]:
                 bb_size = hand["blinds"][1] or 1
                 folded_pre = set()
                 saw_flop = set()
+                street, street_bet = 0, False
+                exposed_by, flop_ranks, flop_bettor = {}, set(), None
                 for ev in hand["events"]:
                     kind, seat = ev.get("kind"), ev.get("seat")
+                    if kind == "reveal" and seat is not None and ev.get("cards"):
+                        exposed_by[seat] = ev["cards"][0]
                     if kind == "board":
                         if preflop:
                             saw_flop = {i for i in alive if i not in folded_pre}
+                            flop_ranks = {c[0] for c in ev.get("cards", [])}
                         preflop = False
+                        street += 1
+                        street_bet = False
+                        flop_bettor = None
+                    if street == 1 and seat is not None and kind in ("fold", "call", "raise"):
+                        if flop_bettor is not None and seat != flop_bettor:
+                            paired = exposed_by.get(flop_bettor, "?")[0] in flop_ranks
+                            fb = flopbets.setdefault(seats[flop_bettor].split("#")[0], {True: [0, 0], False: [0, 0]})
+                            fb[paired][0] += 1
+                            fb[paired][1] += kind == "fold"
+                        if kind == "raise" and flop_bettor is None:
+                            flop_bettor = seat
+                    if street == 3 and kind in ("fold", "call", "raise") and seat is not None:
+                        if street_bet:
+                            rv = river.setdefault(seats[seat].split("#")[0], {"fold": 0, "call": 0, "raise": 0})
+                            rv[kind] += 1
+                        if kind == "raise":
+                            street_bet = True
+                    elif street in (1, 2) and kind == "raise":
+                        street_bet = True
                     elif preflop and kind == "fold" and seat is not None:
                         folded_pre.add(seat)
                         if reraised and seat == opener:
@@ -212,6 +238,11 @@ def main(argv=None) -> int:
             size += f"  flops/table {flops.get(name, 0) / max(1, n):.1f}"
             rr = reraises.get(name, [0, 0])
             size += f"  fold-after-reraise {100 * rr[1] / max(1, rr[0]):.0f}% ({rr[0]})"
+            rv = river.get(name, {"fold": 0, "call": 0, "raise": 0}); tot = max(1, sum(rv.values()))
+            fb = flopbets.get(name, {True: [0, 0], False: [0, 0]})
+            size += (f"  folds to our flop bet: exposed pairs {100 * fb[True][1] / max(1, fb[True][0]):.0f}% ({fb[True][0]})"
+                     f" / not {100 * fb[False][1] / max(1, fb[False][0]):.0f}% ({fb[False][0]})")
+            size += f"  river facing bet: fold {100 * rv['fold'] / tot:.0f}% call {100 * rv['call'] / tot:.0f}% raise {100 * rv['raise'] / tot:.0f}% ({tot})"
             print(f"    {name:14} VPIP {100 * vpip / hands:5.1f}%  shove {100 * shoves / hands:4.1f}%  "
                   f"first-in raise {100 * opens_ / hands:4.1f}%  fold-to-raise {100 * folds / max(1, faced):4.1f}%  "
                   f"{where}  {size}\n{' ' * 19}"

@@ -34,7 +34,8 @@ than playing hold'em with 50/30/20 by default.
 from __future__ import annotations
 
 from bot.flags import flag
-from bot.hands import TOP_PAIR, WEAK_PAIR, strong_draw
+from bot.hands import TOP_PAIR, TWO_PAIR_PLUS, WEAK_PAIR, flush_draw, hand_strength, straight_outs, strong_draw
+from bot.rules import STRAIGHT
 from bot.icm import cached_bubble_factor
 from bot.preflop import ranks_for
 from bot.rules import RulesError
@@ -179,6 +180,14 @@ class PolicyBot(PushFoldBot):
         if strength == WEAK_PAIR and folds < STICKY:
             return state.pot // 2
         heads_up = len(others) == 1
+        if (flag("expose_play", "off") == "on" and state.street == 1 and len(others) <= 2
+                and self._my_exposed_pairs_board(state) and (strength >= WEAK_PAIR
+                                                             or strong_draw(state.hole, state.board, state.rules))):
+            return state.pot // 2  # our exposed card pairs the flop: the field folds 66% to this bet
+        if (flag("late_streets", "off") == "on" and state.street == 1 and strength < TOP_PAIR
+                and not strong_draw(state.hole, state.board, state.rules)
+                and (len(others) >= 2 or self._strong_visible(state))):
+            return None  # no c-bet into 3+ players or a visible made hand without top pair or a draw
         cbet = state.street == 1 and heads_up and _last_raiser(state, 0) == state.seat
         if cbet and folds >= CBET_FOLDS and not self._strong_visible(state):
             return state.pot // 2  # a bluff, never into a hand we can see is strong
@@ -192,6 +201,52 @@ class PolicyBot(PushFoldBot):
 
     def _fold_marginal(self, state) -> bool:
         return self._strong_visible(state)
+
+    def _my_exposed_pairs_board(self, state) -> bool:
+        exposed = getattr(state, "exposed", ())
+        mine = exposed[state.seat] if state.seat < len(exposed) else -1
+        return mine >= 0 and (mine >> 2) in {c >> 2 for c in state.board}
+
+    def _late_streets(self, state):
+        """late_streets (Bay Area): everyone keeps the best two of three, so bettors on the turn
+        and river mostly hold two pair or better; raise and call much tighter than hold'em."""
+        rules = state.rules
+        if flag("late_streets", "off") != "on" or not getattr(rules, "exposes", 0) or state.street == 0:
+            return None
+        legal = state.legal
+        if legal.can_check:
+            return None
+        s = hand_strength(state.hole, state.board, rules)
+        if s is None:
+            return None
+        order = rules.category_order
+        cat = order.index(s.category)
+        straight_plus = cat >= order.index(STRAIGHT)
+        board_ranks = {c >> 2 for c in state.board}
+        hole_ranks = [c >> 2 for c in state.hole]
+        pocket = len(hole_ranks) == 2 and hole_ranks[0] == hole_ranks[1]
+        a_set = pocket and hole_ranks[0] in board_ranks
+        uses_hole = any(r in board_ranks for r in hole_ranks) or pocket
+        two_pair_plus_hole = s.bucket >= TWO_PAIR_PLUS and uses_hole
+        both_hole = all(r in board_ranks for r in hole_ranks) and len(set(hole_ranks)) == 2
+        pot_odds = legal.call_amount * 2 <= state.pot
+        draw = strong_draw(state.hole, state.board, rules)
+        if state.street == 1:  # flop: raise only with two pair+ using both cards, a set, or a combo draw
+            combo = draw and flush_draw(state.hole, state.board, rules) and len(straight_outs(state.hole, state.board, rules)) >= 2
+            if (s.bucket >= TWO_PAIR_PLUS and (both_hole or a_set)) or straight_plus or combo:
+                return raise_to(legal, 3 * max(state.bets))
+            if s.bucket >= TWO_PAIR_PLUS:
+                return check_or(legal, call=pot_odds)
+            return None  # the usual flop logic for the rest
+        if straight_plus or a_set:
+            return raise_to(legal, 3 * max(state.bets))
+        if state.street == 2:  # turn
+            return check_or(legal, call=two_pair_plus_hole or s.bucket == TOP_PAIR or (draw and pot_odds))
+        # river
+        if self._strong_visible(state):
+            return check_or(legal, call=False)
+        small = legal.call_amount * 3 <= state.pot - legal.call_amount
+        return check_or(legal, call=two_pair_plus_hole or (s.bucket == TOP_PAIR and small))
 
     def _fold_to_reraise(self, seat):
         st = self.tracker._seat(seat)

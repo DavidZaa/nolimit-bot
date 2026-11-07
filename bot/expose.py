@@ -18,7 +18,7 @@ from collections import Counter
 
 from bot.discard import default_rules
 from bot.flags import flag
-from bot.hands import TOP_PAIR, hand_strength
+from bot.hands import TOP_PAIR, WEAK_PAIR, hand_strength
 from bot.hands import _straights as straights
 
 
@@ -54,6 +54,16 @@ def choose_expose(kept, board, rules=None) -> int:
     if len(kept) == 1:
         return kept[0]
     strength = hand_strength(kept, board, rules)
+    if flag("expose_play", "off") == "on":
+        # The field folds 66% to our flop bets when our exposed card pairs the flop (44-49%
+        # otherwise): with exactly one pair, show the card that pairs; no pair, the higher card.
+        if strength is not None and strength.bucket in (WEAK_PAIR, TOP_PAIR):
+            board_ranks = {c >> 2 for c in board}
+            pairing = [c for c in kept if c >> 2 in board_ranks]
+            if pairing:
+                return min(pairing)
+        elif strength is None or strength.bucket < WEAK_PAIR:
+            return max(kept, key=lambda c: (c >> 2, -c))
     if flag("calibrated", "off") == "on":
         # The field's habit, measured: show the lower card unless it's the one making our hand.
         low, high = sorted(kept, key=lambda c: (c >> 2, c))

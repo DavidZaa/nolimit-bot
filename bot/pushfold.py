@@ -211,6 +211,17 @@ class PushFoldBot:
             return commit(legal)
 
         pre_raises = [r.seat for r in state.actions if r.street == 0 and r.kind == RAISE]
+        if (getattr(state.rules, "discards", 0) and flag("bb_defense", "off") == "on" and seat == state.bb_seat
+                and len(pre_raises) == 1 and pre_raises[0] in (state.button, state.sb_seat)
+                and highest <= 2.5 * bb and highest < state.stacks[pre_raises[0]] + state.bets[pre_raises[0]]
+                and not any(r.kind == CALL and r.street == 0 for r in state.actions) and depth >= 10):
+            if depth > 20:
+                if pct <= 0.05:
+                    return raise_to(legal, 3 * highest)
+                if pct <= 0.25:
+                    return Action(CALL) if legal.can_call else check_or(legal, call=False)
+                return check_or(legal, call=False)
+            return commit(legal) if pct <= 0.25 else check_or(legal, call=False)
         if closer and len(pre_raises) == 1 and seat not in pre_raises:
             raiser = pre_raises[0]
             their_all_in = highest >= state.stacks[raiser] + state.bets[raiser]
@@ -306,6 +317,9 @@ class PushFoldBot:
         exact = self._river_decision(state)
         if exact is not None:
             return exact
+        late = self._late_streets(state)
+        if late is not None:
+            return late
         strength = made_hand(state.hole, state.board, state.rules)
         if legal.can_check:
             size = self._bet_when_checked_to(state, strength)
@@ -373,6 +387,9 @@ class PushFoldBot:
 
     def _river_decision(self, state):
         """A river action from exact equity, or None to use the bucket logic."""
+        return None
+
+    def _late_streets(self, state):
         return None
 
     def _defends(self, state, strength: int) -> bool:
