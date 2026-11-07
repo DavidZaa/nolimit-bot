@@ -181,6 +181,9 @@ class PolicyBot(PushFoldBot):
         if strength == WEAK_PAIR and folds < STICKY:
             return state.pot // 2
         heads_up = len(others) == 1
+        if (flag("late_streets", "off") == "on" and state.street >= 3 and strength >= TWO_PAIR_PLUS
+                and self._two_pair_with_hole(state)):
+            return state.pot * 3 // 4  # river value bet
         if (flag("expose_play", "off") == "on" and state.street == 1 and len(others) <= 2
                 and self._my_exposed_pairs_board(state) and (strength >= WEAK_PAIR
                                                              or strong_draw(state.hole, state.board, state.rules))):
@@ -206,6 +209,11 @@ class PolicyBot(PushFoldBot):
 
     def _fold_marginal(self, state) -> bool:
         return self._strong_visible(state)
+
+    def _two_pair_with_hole(self, state) -> bool:
+        board_ranks = {c >> 2 for c in state.board}
+        hole_ranks = [c >> 2 for c in state.hole]
+        return any(r in board_ranks for r in hole_ranks) or (len(hole_ranks) == 2 and hole_ranks[0] == hole_ranks[1])
 
     def _my_exposed_pairs_board(self, state) -> bool:
         exposed = getattr(state, "exposed", ())
