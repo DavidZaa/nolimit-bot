@@ -13,9 +13,10 @@ tuned, so the two are kept separate on purpose.
 
 from __future__ import annotations
 
+from bot.actions import check_or, commit, raise_to
 from bot.preflop import CHEN
 from bot.hands import TOP_PAIR, TWO_PAIR_PLUS, made_hand
-from bot.state import CALL, CHECK, FOLD, RAISE, Action
+from bot.state import CHECK, RAISE, Action
 
 SHOVE_DEPTH_BB = 15  # first-in, shove or fold at or below this many big blinds
 OPEN_TO_BB = 2.5
@@ -28,19 +29,6 @@ def shove_range(depth_bb: float, behind: int) -> float:
     """Share of hands to shove first-in. Shaped like Nash charts (SB ~58% at 10 BB,
     UTG ~12%), not solved."""
     return min(1.0, 5.8 / (max(depth_bb, 1.0) * max(behind, 1) ** 0.8))
-
-
-def _raise_to(legal, amount) -> Action:
-    """Raise as close to `amount` as the rules allow; call or check when raising isn't."""
-    if legal.can_raise:
-        return Action(RAISE, max(legal.min_raise_to, min(int(amount), legal.max_raise_to)))
-    return Action(CALL) if legal.can_call else Action(CHECK)
-
-
-def _check_or(legal, call: bool) -> Action:
-    if legal.can_check:
-        return Action(CHECK)
-    return Action(CALL) if call else Action(FOLD)
 
 
 def seats_behind(state, seat: int) -> list[int]:
@@ -85,14 +73,14 @@ class PushFoldBot:
             widen = self._steal_widening(state, behind)
             if depth <= SHOVE_DEPTH_BB:
                 if pct <= shove_range(depth, len(behind)) * widen / self._shove_tightness(state, behind):
-                    return _raise_to(legal, legal.max_raise_to)
-                return _check_or(legal, call=False)
+                    return commit(legal)
+                return check_or(legal, call=False)
             if pct <= 0.45 / max(len(behind), 1) ** 0.8 * widen:
-                return _raise_to(legal, OPEN_TO_BB * bb)
-            return _check_or(legal, call=False)
+                return raise_to(legal, OPEN_TO_BB * bb)
+            return check_or(legal, call=False)
 
         if pct <= self._resteal_range(state, depth):
-            return _raise_to(legal, legal.max_raise_to)
+            return commit(legal)
 
         if legal.call_amount >= 0.4 * state.stacks[seat] or depth <= SHOVE_CALL_DEPTH_BB:
             # Effectively all-in: get it in with the top of the range they'd shove.
@@ -100,25 +88,25 @@ class PushFoldBot:
             theirs = self._raiser_range(state, raiser, bb)
             waiting = self._still_to_act(state, seat, raiser)
             if pct <= theirs * 0.7 / (1 + 0.5 * waiting) / self._call_tightness(state, raiser):
-                return _raise_to(legal, legal.max_raise_to)
-            return _check_or(legal, call=False)
+                return commit(legal)
+            return check_or(legal, call=False)
 
         if pct <= PREMIUM:
-            return _raise_to(legal, 3 * highest)
+            return raise_to(legal, 3 * highest)
         cheap = legal.call_amount <= 0.1 * (state.stacks[seat] + state.bets[seat])
-        return _check_or(legal, call=pct <= DEEP_CALL and cheap)
+        return check_or(legal, call=pct <= DEEP_CALL and cheap)
 
     def _postflop(self, state) -> Action:
         legal = state.legal
         strength = made_hand(state.hole, state.board, state.rules)
         if legal.can_check:
             size = self._bet_when_checked_to(state, strength)
-            return Action(CHECK) if size is None else _raise_to(legal, size)
+            return Action(CHECK) if size is None else raise_to(legal, size)
         if strength >= TWO_PAIR_PLUS:
-            return _raise_to(legal, 3 * max(state.bets))
+            return raise_to(legal, 3 * max(state.bets))
         pot_sized_or_less = legal.call_amount * 2 <= state.pot  # the pot already holds the bet
         stays = strength >= TOP_PAIR or self._defends(state, strength)
-        return _check_or(legal, call=stays and pot_sized_or_less)
+        return check_or(legal, call=stays and pot_sized_or_less)
 
     # -- reads the tracker-driven policy refines ------------------------------
 

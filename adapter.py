@@ -98,7 +98,9 @@ def _blinds(state, log: TableLog) -> tuple[int, int, int]:
         return posts.get(POST_SB, big // 2), big, 0
 
 
-def legal_actions(state, stack: int) -> LegalActions:
+def legal_actions(state, stack: int, bet: int) -> LegalActions:
+    """The kit's offered kinds in our terms. Its raise min/max are raise-to totals for the
+    round, like ours; all-in is our own bet plus stack, never assumed to be the max."""
     fold, check, call, raise_ = (state.can(k) for k in ("fold", "check", "call", "raise"))
     to_call = min(int(getattr(state, "to_call", 0) or 0), stack)
     if raise_ is not None:
@@ -106,7 +108,8 @@ def legal_actions(state, stack: int) -> LegalActions:
     else:
         lo = hi = 0
     return LegalActions(fold is not None, check is not None, call is not None, to_call,
-                        raise_ is not None and hi >= lo > 0, lo if raise_ else 0, hi if raise_ else 0)
+                        raise_ is not None and hi >= lo > 0, lo if raise_ else 0, hi if raise_ else 0,
+                        bet + stack, bet)
 
 
 def to_game_state(state, log: TableLog, index: dict, rules: GameRules) -> GameState:
@@ -135,7 +138,7 @@ def to_game_state(state, log: TableLog, index: dict, rules: GameRules) -> GameSt
         hole=tuple(to_card(c) for c in state.cards), board=tuple(to_card(c) for c in state.board),
         stacks=stacks, bets=bets, pot=int(state.pot), in_hand=in_hand,
         players_left=int(getattr(state, "players_remaining", 0) or sum(1 for s in stacks if s)),
-        legal=legal_actions(state, stacks[me]), actions=log.actions(),
+        legal=legal_actions(state, stacks[me], bets[me]), actions=log.actions(),
         rules=rules,
     )
 
@@ -149,20 +152,44 @@ def automatic(state):
 
 
 def to_kit_action(action: Action, state):
+    """Our action as the kit's, legal by construction. Each intent maps to itself when the
+    kit offers it; otherwise to its nearest legal neighbour, never across a fold/call line:
+
+      raise   raise_to(total) clamped to the offered min..max (both raise-to totals, as
+              ours are); without a raise on offer, call (it wanted chips in), else check
+      call    call; else check (nothing to call)
+      check   check; else fold (a check intention never puts chips in)
+      fold    fold; else check (never fold when checking is free)
+
+    The kit doesn't clamp raises and rounds floats down, so the total is an int inside
+    min_amount..max_amount before it leaves here. Anything else gets the fallback.
+    """
     can = state.can
-    kind = action.kind
-    if kind == RAISE and can("raise") is not None:
+    kind = getattr(action, "kind", None)
+    if kind == RAISE:
         r = can("raise")
-        return sdk.Action.raise_to(max(int(r.min_amount), min(int(action.amount), int(r.max_amount))))
-    if kind in (RAISE, CALL) and can("call") is not None:
-        return sdk.Action.call()
-    if kind != FOLD and can("check") is not None:
-        return sdk.Action.check()
-    if can("fold") is not None:
-        return sdk.Action.fold()
-    if can("check") is not None:
-        return sdk.Action.check()
-    return automatic(state)
+        if r is not None and int(r.max_amount) >= int(r.min_amount):
+            try:
+                total = int(action.amount)
+            except (TypeError, ValueError, OverflowError):
+                total = int(r.min_amount)
+            return sdk.Action.raise_to(max(int(r.min_amount), min(total, int(r.max_amount))))
+        if can("call") is not None:
+            return sdk.Action.call()
+        return _fallback(state)
+    if kind == CALL:
+        if can("call") is not None:
+            return sdk.Action.call()
+        return _fallback(state)
+    if kind == CHECK:
+        if can("check") is not None:
+            return sdk.Action.check()
+        return sdk.Action.fold() if can("fold") is not None else _fallback(state)
+    if kind == FOLD:
+        if can("fold") is not None:
+            return sdk.Action.fold()
+        return _fallback(state)
+    return _fallback(state)
 
 
 def _fallback(state):

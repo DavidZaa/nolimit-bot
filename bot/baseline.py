@@ -14,7 +14,9 @@ from __future__ import annotations
 
 from itertools import combinations
 
-from bot.state import CALL, CHECK, FOLD, RAISE, Action
+from bot.actions import commit
+
+from bot.state import CALL, CHECK, FOLD, Action
 
 # Chen formula points for the high card, indexed by rank (2..A).
 _HIGH = (1, 1.5, 2, 2.5, 3, 3.5, 4, 4.5, 5, 6, 7, 8, 10)
@@ -126,7 +128,5 @@ class BaselineBot:
             in_range = preflop_percentile(state.hole) <= min(1.0, _open_range(depth) * 2 / (1 + 0.5 * behind))
 
         if in_range:
-            if legal.can_raise:
-                return Action(RAISE, legal.max_raise_to)
-            return Action(CALL) if legal.can_call else Action(CHECK)
+            return commit(legal)  # all-in where legal (pot-limit: the max raise)
         return Action(CHECK) if legal.can_check else Action(FOLD)

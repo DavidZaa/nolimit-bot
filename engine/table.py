@@ -297,7 +297,9 @@ class _Hand:
         else:
             min_to = max_to = 0
         facing = to_call > 0
-        return LegalActions(facing, not facing, facing, min(to_call, stack), can_raise, min_to, max_to)
+        bet = self.bets[seat]
+        return LegalActions(facing, not facing, facing, min(to_call, stack), can_raise, min_to, max_to,
+                            bet + stack, bet)
 
     def _decide(self, seat: int, legal: LegalActions) -> Action:
         state = GameState(

@@ -54,13 +54,17 @@ class Action(NamedTuple):
 
 
 class LegalActions(NamedTuple):
+    """What the table allows now. Raise amounts are totals for this betting round ("raise to")."""
+
     can_fold: bool  # only when there is something to call
     can_check: bool
     can_call: bool
-    call_amount: int  # chips added by calling; may be less than the bet if all-in
+    call_amount: int  # chips added by calling; less than the bet when it puts us all-in
     can_raise: bool
     min_raise_to: int  # equals max_raise_to when the only raise is a short all-in
-    max_raise_to: int
+    max_raise_to: int  # no-limit: all-in; pot-limit: the pot, which can be less than all-in
+    all_in_to: int = 0  # the total that puts every chip in (bet + stack); 0 if the table didn't say
+    bet: int = 0  # this seat's bet so far this round
 
 
 class ActionRecord(NamedTuple):
