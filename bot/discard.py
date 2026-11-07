@@ -33,7 +33,7 @@ def default_rules():
     evaluate hands when a caller has no GameRules of its own."""
     from bot.rules import make_rules
 
-    return make_rules("three_card_discard", payouts=(50, 30, 20), starting_stack=2000,
+    return make_rules("flop_discard_reveal", payouts=(50, 30, 20), starting_stack=2000,
                       blind_schedule=((10, 20, 0),), hands_per_level=20, hand_cap=250, seats=8)
 
 

@@ -48,27 +48,24 @@ import poker_agent_sdk as sdk  # noqa: E402
 from bot.events import TableLog  # noqa: E402
 from bot.handeval import warm as warm_evaluator  # noqa: E402
 from bot.policy import PolicyBot  # noqa: E402
-from bot.rules import VARIANTS, RulesError, rules_from_config, rules_from_state  # noqa: E402
+from bot.rules import VARIANTS, RulesError, blind_level, rules_from_config, rules_from_state  # noqa: E402
 from bot.runtime import tune_gc  # noqa: E402
 from bot.safety import SafeBot  # noqa: E402
+from bot.select import DEFAULT_SELECT, choose_select  # noqa: E402
 from bot.state import (  # noqa: E402
     CALL, CHECK, FOLD, POST_BB, POST_SB, RAISE, Action, GameRules, GameState, LegalActions, card_from_str,
 )
 from bot.tracker import Tracker  # noqa: E402
 
-# -- PLACEHOLDER(kit): everything the announced variant's SDK details decide -------------
-# The variant was announced before its kit: 3 hole cards; on the flop each player discards
-# one and exposes one of the two kept. Strategy (bot/discard.py, bot/expose.py) never sees
-# these names; only this block and to_card_action do. Fill them in from the real SDK.
-VARIANT_ALIASES = {"three_card_discard": "three_card_discard"}  # SDK variant ID -> bot.rules.VARIANTS
-DISCARD_KINDS = ("discard",)  # legal action kinds (substrings) that ask for a discard
-EXPOSE_KINDS = ("expose",)  # ... that ask for a card to show
-DISCARD_PHASES = ("discard",)  # state.phase values (substrings) for the discard
-EXPOSE_PHASES = ("expose",)  # ... for the expose
-EXPOSE_EVENT_KINDS = ("expose",)  # event kinds that carry a seat's exposed card in .cards
-CARD_CHOICE = "index"  # how an action names its card: "index" (position in state.cards, as the
-#                        amount), "string" ("As" as the amount) or "legal" (pick the offered
-#                        LegalAction carrying that card)
+# -- The Bay Area variant's SDK names (kit RULES.md, poker_agent_protocol.game) ----------
+# After the flop is dealt and before flop betting, state.phase is "select" and the only
+# legal kind is "select": Action("select", cards=(discard_index, reveal_index)) with indexes
+# into the three cards in dealing order and amount 0. A failed or empty selection plays
+# (2, 0). Afterwards state.cards holds the two kept cards, and a "reveal" event per seat
+# carries its exposed card.
+VARIANT_ALIASES: dict = {}  # SDK variant ID -> bot.rules.VARIANTS, for an ID not registered there
+SELECT_PHASE = "select"
+SELECT_KIND = "select"
 
 MEMORY_VERSION = 1
 MEMORY_BUDGET = 16_000  # bytes; the kit allows 64 KB but anything past ~16 KB costs decision time
@@ -109,12 +106,8 @@ def to_card(kit_card) -> int:
 
 def _blinds(state, log: TableLog) -> tuple[int, int, int]:
     """(small, big, ante) for this hand, from state.blinds, else from what was posted."""
-    raw = getattr(state, "blinds", None)
     try:
-        if hasattr(raw, "big"):
-            return int(raw.small), int(raw.big), int(getattr(raw, "ante", 0) or 0)
-        nums = [int(x) for x in raw]
-        return nums[0], nums[1], nums[2] if len(nums) > 2 else 0
+        return blind_level(getattr(state, "blinds", None))  # the kit's BlindLevel, or a sequence
     except Exception:
         posts = {k: a for _, st, k, a in log.records if st == 0 and k in (POST_SB, POST_BB)}
         big = posts.get(POST_BB, 0)
@@ -133,6 +126,21 @@ def legal_actions(state, stack: int, bet: int) -> LegalActions:
     return LegalActions(fold is not None, check is not None, call is not None, to_call,
                         raise_ is not None and hi >= lo > 0, lo if raise_ else 0, hi if raise_ else 0,
                         bet + stack, bet)
+
+
+def exposed_cards(state, log: TableLog, index: dict) -> tuple[int, ...]:
+    """Each seat's exposed card this hand (-1 if none): from the reveal events, else from what
+    the seat shows (shown_cards holds just the exposed card until a showdown)."""
+    out = [-1] * len(index)
+    for seat, card in log.exposed.items():
+        if 0 <= seat < len(out):
+            out[seat] = card_from_str(card)
+    for s in state.seats:
+        i = index.get(s.seat)
+        shown = tuple(getattr(s, "shown_cards", ()) or ())
+        if i is not None and out[i] < 0 and len(shown) == 1:
+            out[i] = card_from_str(str(shown[0]))
+    return tuple(out)
 
 
 def to_game_state(state, log: TableLog, index: dict, rules: GameRules) -> GameState:
@@ -162,7 +170,7 @@ def to_game_state(state, log: TableLog, index: dict, rules: GameRules) -> GameSt
         stacks=stacks, bets=bets, pot=int(state.pot), in_hand=in_hand,
         players_left=int(getattr(state, "players_remaining", 0) or sum(1 for s in stacks if s)),
         legal=legal_actions(state, stacks[me], bets[me]), actions=log.actions(),
-        rules=rules,
+        rules=rules, exposed=exposed_cards(state, log, index),
     )
 
 
@@ -215,6 +223,23 @@ def to_kit_action(action: Action, state):
     return _fallback(state)
 
 
+def select_action(state):
+    """The Bay Area selection: our discard and reveal, or the kit's default (2, 0) on any error."""
+    try:
+        try:
+            rules, warnings = rules_from_state(state, aliases=VARIANT_ALIASES)
+            for warning in warnings:
+                _report_once(f"RULES WARNING (playing on a guess): {warning}")
+        except RulesError:
+            rules = None  # the choosers' own rules for this variant
+        hole = tuple(to_card(c) for c in state.cards)
+        board = tuple(to_card(c) for c in state.board)
+        discard, reveal = choose_select(hole, board, rules)
+        return sdk.Action(SELECT_KIND, 0, (int(discard), int(reveal)))
+    except Exception:
+        return sdk.Action(SELECT_KIND, 0, DEFAULT_SELECT)
+
+
 def _fallback(state):
     if state.can("check") is not None:
         return sdk.Action.check()
@@ -237,6 +262,8 @@ def decide(state, memory: bytes):
         new_memory = dump_memory(tracker, log)
     except Exception:
         return _fallback(state), memory
+    if getattr(state, "phase", None) == SELECT_PHASE or state.can(SELECT_KIND) is not None:
+        return select_action(state), new_memory
     try:
         if getattr(state, "phase", "betting") != "betting" or not any(
                 state.can(k) for k in ("fold", "check", "call", "raise")):

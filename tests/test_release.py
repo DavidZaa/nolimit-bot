@@ -42,8 +42,9 @@ def test_the_manifest_records_what_was_built_and_what_is_still_pending(built):
     assert manifest["variant"]["starting_hands"] == "bot/hand_tables/plo.py"
     assert manifest["code"]["revision"] and manifest["tests"] == {"status": "skipped"}
     assert any("act calls" in line for line in manifest["smoke_and_latency"]["output"])
+    assert manifest["sdk"] in ("official", "stand-in")  # official once the kit's SDK is installed
     if shutil.which("poker-agent") is None:
-        assert manifest["sdk"] == "stand-in" and manifest["official_checks"]["status"] == "pending"
+        assert manifest["official_checks"]["status"] == "pending"
         assert "NOT YET VALIDATED AGAINST THE OFFICIAL SDK" in run.stdout
 
 

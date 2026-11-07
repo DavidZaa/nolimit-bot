@@ -325,7 +325,8 @@ def test_translation_against_the_official_sdk():
 # -- the announced three-card discard variant ---------------------------------------------------
 
 def test_the_discard_variant_is_registered_with_its_card_rules():
-    card = R.card_rules("three_card_discard")
+    card = R.card_rules("flop_discard_reveal")
+    assert R.card_rules("bay_area") == card  # the engine's name and the public ID
     assert (card["hole_cards"], card["discards"], card["exposes"]) == (3, 1, 1)
     assert card["hole_cards_used"] is None and card["betting"] == "no_limit"
     assert all(R.card_rules(v)["discards"] == 0 for v in ("nlhe", "plo", "short_deck"))
@@ -337,14 +338,14 @@ def test_an_unknown_variant_with_three_hole_cards_is_the_discard_variant(monkeyp
     state = kit_state(Bare(**dict(FULL, variant="announced_but_unknown")), cards=("As", "Ad", "Kh"))
     rules, warnings = R.rules_from_state(state)
     assert (rules.hole_cards, rules.discards, rules.exposes) == (3, 1, 1)
-    assert rules.variant == "announced_but_unknown" and "three_card_discard" in warnings[0]
+    assert rules.variant == "announced_but_unknown" and "flop_discard_reveal" in warnings[0]
     assert decide(state, b"")[0].kind == "raise"  # aces facing a raise: the strategy, not a fold
     assert "RULES WARNING" in capsys.readouterr().err
 
 
 def test_the_sdk_id_maps_onto_the_registered_variant_without_warnings(monkeypatch):
     monkeypatch.delenv("NLB_STRICT", raising=False)
-    monkeypatch.setitem(adapter.VARIANT_ALIASES, "sdk_says_this", "three_card_discard")
+    monkeypatch.setitem(adapter.VARIANT_ALIASES, "sdk_says_this", "flop_discard_reveal")
     state = kit_state(Bare(**dict(FULL, variant="sdk_says_this")), cards=("As", "Ad", "Kh"))
     rules, warnings = R.rules_from_state(state, aliases=adapter.VARIANT_ALIASES)
     assert warnings == () and rules.discards == 1

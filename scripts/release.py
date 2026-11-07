@@ -129,14 +129,17 @@ def check_artifact(out: Path) -> dict:
 
 
 def sdk_site() -> tuple[str, str]:
-    """(a directory holding poker_agent_sdk, 'official' or 'stand-in')."""
-    probe = subprocess.run([sys.executable, "-c", "import poker_agent_sdk, os; "
-                            "print(os.path.dirname(os.path.dirname(os.path.abspath(poker_agent_sdk.__file__))))"],
+    """(directories holding the SDK packages, joined by os.pathsep; 'official' or 'stand-in').
+    The official SDK is two packages (poker_agent_sdk and poker_agent_protocol), which an
+    editable install keeps in separate source folders."""
+    probe = subprocess.run([sys.executable, "-c", "import os, poker_agent_sdk, poker_agent_protocol as p; "
+                            "d = lambda m: os.path.dirname(os.path.dirname(os.path.abspath(m.__file__))); "
+                            "print(d(poker_agent_sdk)); print(d(p))"],
                            capture_output=True, text=True, cwd=tempfile.gettempdir(),
                            env={"PATH": os.environ.get("PATH", "")})
-    found = probe.stdout.strip()
-    if probe.returncode == 0 and found and not found.startswith(str(ROOT / "kitsim")):
-        return found, "official"
+    found = [line for line in probe.stdout.split() if line]
+    if probe.returncode == 0 and found and not any(f.startswith(str(ROOT / "kitsim")) for f in found):
+        return os.pathsep.join(dict.fromkeys(found)), "official"
     site = Path(tempfile.mkdtemp(prefix="release-sdk-"))
     shutil.copytree(ROOT / "kitsim" / "poker_agent_sdk", site / "poker_agent_sdk",
                     ignore=shutil.ignore_patterns("__pycache__"))
@@ -146,7 +149,7 @@ def sdk_site() -> tuple[str, str]:
 def isolated_import(out: Path) -> str:
     site, which = sdk_site()
     probe = (
-        "import sys; sys.path[:0] = [sys.argv[1], sys.argv[2]]\n"
+        "import os, sys; sys.path[:0] = [sys.argv[1], *sys.argv[2].split(os.pathsep)]\n"
         "import agent, bot\n"
         "assert agent.__file__.startswith(sys.argv[1]) and bot.__file__.startswith(sys.argv[1])\n"
         "for name in %r:\n"

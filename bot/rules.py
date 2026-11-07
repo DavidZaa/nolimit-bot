@@ -39,6 +39,10 @@ SUITS = ("c", "d", "h", "s")
 BETTING = ("no_limit", "pot_limit")
 ANY_FIVE = None  # hole_cards_used for hold'em-style hands: best five of all cards
 
+DISCARD_VARIANT = dict(ranks=tuple(range(13)), suits=SUITS, hole_cards=3, hole_cards_used=ANY_FIVE,
+                       preflop_board=0, board_schedule=(3, 1, 1), category_order=STANDARD_ORDER,
+                       ace_low_straight=True, betting="no_limit", discards=1, exposes=1)
+
 # Card rules per SDK variant ID. PLACEHOLDER(kit): the IDs are ours until the
 # SDK reports its own; add the announced one under the exact ID it uses.
 VARIANTS: dict[str, dict] = {
@@ -51,13 +55,12 @@ VARIANTS: dict[str, dict] = {
     "plo": dict(ranks=tuple(range(13)), suits=SUITS, hole_cards=4, hole_cards_used=2,
                 preflop_board=0, board_schedule=(3, 1, 1), category_order=STANDARD_ORDER,
                 ace_low_straight=True, betting="pot_limit"),
-    # The announced variant (2026-11-06). PLACEHOLDER(kit): the ID is ours; adapter.py maps
-    # the SDK's ID onto it (VARIANT_ALIASES). Three hole cards; on the flop each player
-    # discards one and exposes one of the two kept; then hold'em with two hole cards, best
-    # five of all. When exactly the discard/expose happen is the kit's business (adapter).
-    "three_card_discard": dict(ranks=tuple(range(13)), suits=SUITS, hole_cards=3, hole_cards_used=ANY_FIVE,
-                               preflop_board=0, board_schedule=(3, 1, 1), category_order=STANDARD_ORDER,
-                               ace_low_straight=True, betting="no_limit", discards=1, exposes=1),
+    # The Bay Area variant (kit RULES.md): three hole cards; after the flop is dealt and
+    # before flop betting, every player still in discards one face down and exposes one of
+    # the two kept; then hold'em with the two kept cards, best five of board and hand. The
+    # engine's name is flop_discard_reveal, its public ID bay_area: the server may send either.
+    "flop_discard_reveal": DISCARD_VARIANT,
+    "bay_area": DISCARD_VARIANT,
 }
 
 CARD_FIELDS = ("ranks", "suits", "hole_cards", "hole_cards_used", "preflop_board", "board_schedule",
@@ -83,12 +86,17 @@ def _int(value, name: str, low: int = 0) -> int:
     return value
 
 
-def _level(raw, i: int) -> tuple[int, int, int]:
-    """One blind level: (small, big[, ante]) as a sequence, or an object/dict with small/big/ante."""
-    if isinstance(raw, dict):
-        parts = (raw.get("small"), raw.get("big"), raw.get("ante", 0))
+def blind_level(raw, i: int = 0) -> tuple[int, int, int]:
+    """One blind level as (small, big, ante). The kit sends BlindLevel(small_blind, big_blind,
+    ante) objects (poker_agent_protocol.game); our simulator sends (small, big[, ante])
+    sequences; dicts and .small/.big objects are accepted too."""
+    if hasattr(raw, "big_blind"):  # the kit's BlindLevel
+        parts = (getattr(raw, "small_blind", None), raw.big_blind, getattr(raw, "ante", 0) or 0)
+    elif isinstance(raw, dict):
+        parts = (raw.get("small_blind", raw.get("small")), raw.get("big_blind", raw.get("big")),
+                 raw.get("ante", 0) or 0)
     elif hasattr(raw, "big"):
-        parts = (getattr(raw, "small", None), raw.big, getattr(raw, "ante", 0))
+        parts = (getattr(raw, "small", None), raw.big, getattr(raw, "ante", 0) or 0)
     else:
         try:
             parts = tuple(raw)
@@ -161,7 +169,7 @@ def check_table_rules(fields: dict) -> dict:
         raise RulesError(f"payouts pay {len(payouts)} places at a {seats}-seat table: {payouts}")
     payouts = (payouts + (0.0,) * seats)[:seats]  # one entry per place; places past the list pay nothing
     try:
-        levels = tuple(_level(raw, i) for i, raw in enumerate(fields["blind_schedule"]))
+        levels = tuple(blind_level(raw, i) for i, raw in enumerate(fields["blind_schedule"]))
     except TypeError:
         raise RulesError(f"blinds schedule is not a list of levels: {fields['blind_schedule']!r}") from None
     if not levels:
@@ -195,7 +203,7 @@ def _blinds_key(raw):
     if raw is None:
         return None
     try:
-        return tuple(_level(level, i) for i, level in enumerate(raw))
+        return tuple(blind_level(level, i) for i, level in enumerate(raw))
     except TypeError:
         raise RulesError(f"blinds schedule is not a list of levels: {raw!r}") from None
 
@@ -282,7 +290,7 @@ def strict_mode() -> bool:
 def _current_level(state) -> tuple[int, int, int] | None:
     raw = getattr(state, "blinds", None)
     try:
-        return _level(raw, 0)
+        return blind_level(raw, 0)
     except Exception:
         return None
 
@@ -300,9 +308,9 @@ def _lenient(raw, hole: int, betting_hint: str, seats_seen: int, current_level):
     except RulesError:
         # 3 hole cards: the announced discard variant; 4+: PLO-style (exactly two from the
         # hand); fewer: hold'em-style.
-        base = "three_card_discard" if hole == 3 else "plo" if hole >= 4 else "nlhe"
+        base = "flop_discard_reveal" if hole == 3 else "plo" if hole >= 4 else "nlhe"
         fields = dict(VARIANTS[base])
-        if hole and base != "three_card_discard":
+        if hole and base != "flop_discard_reveal":
             fields["hole_cards"] = hole
         if betting_hint:
             fields["betting"] = betting_hint
