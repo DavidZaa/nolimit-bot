@@ -27,7 +27,7 @@ from __future__ import annotations
 from bot.state import CALL, FOLD, POST_ANTE, POST_BB, POST_SB, RAISE
 
 PRIOR_WEIGHT = 10
-PRIORS = {"vpip": 0.25, "shove": 0.03, "fold_to_steal": 0.70, "fold_to_bet": 0.50, "cbet": 0.65}
+PRIORS = {"vpip": 0.28, "shove": 0.04, "fold_to_steal": 0.78, "fold_to_bet": 0.50, "cbet": 0.65}  # real-field
 INACTIVE_AFTER = 20  # hands without one voluntary chip before a seat counts as broken
 
 

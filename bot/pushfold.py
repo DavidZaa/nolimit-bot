@@ -79,7 +79,7 @@ LITE_WIDEN, LITE_CALL = 1.3, 0.20
 # shove the top 12% of the opening range at <= 60 BB, 4-bet to 2.3x their raise with the top
 # 8% above (fold to a 5-bet unless top 3%); call with the next 25% in position when the
 # re-raise is <= 3.5x our open.
-DF_SHOVE_BB, DF_SHOVE_TOP, DF_4BET_TOP, DF_4BET_X, DF_5BET_TOP, DF_CALL_NEXT, DF_CALL_X = 60, 0.12, 0.08, 2.3, 0.03, 0.25, 3.5  # re-raised after our open at <= 30 BB: shove the top 40% of the open range
+DF_SHOVE_BB, DF_SHOVE_TOP, DF_4BET_TOP, DF_4BET_X, DF_5BET_TOP, DF_CALL_NEXT, DF_CALL_X = 60, 0.30, 0.15, 2.3, 0.03, 0.35, 3.5  # re-raised after our open at <= 30 BB: shove the top 40% of the open range
 # bubble (build flag): with 4-5 left and our stack covering everyone still to act, pressure.
 BUBBLE_PLAYERS = (4, 5)
 BUBBLE_EARLY_OPEN, BUBBLE_SHOVE = 0.50, 0.50
