@@ -33,14 +33,15 @@ INACTIVE_AFTER = 20  # hands without one voluntary chip before a seat counts as 
 
 class SeatStats:
     __slots__ = ("hands", "vpip", "shoves", "steals_faced", "steal_folds", "bets_faced", "bet_folds",
-                 "cbet_chances", "cbets")
+                 "cbet_chances", "cbets", "reraises_faced", "reraise_folds")
 
     def __init__(self, hands=0, vpip=0, shoves=0, steals_faced=0, steal_folds=0, bets_faced=0, bet_folds=0,
-                 cbet_chances=0, cbets=0):
+                 cbet_chances=0, cbets=0, reraises_faced=0, reraise_folds=0):
         self.hands, self.vpip, self.shoves = hands, vpip, shoves
         self.steals_faced, self.steal_folds = steals_faced, steal_folds
         self.bets_faced, self.bet_folds = bets_faced, bet_folds
         self.cbet_chances, self.cbets = cbet_chances, cbets
+        self.reraises_faced, self.reraise_folds = reraises_faced, reraise_folds
 
 
 def _estimate(observed: int, chances: int, prior: float) -> float:
@@ -151,6 +152,9 @@ class Tracker:
                 if facing and raises == 1 and not raise_called:
                     seat.steals_faced += 1
                     seat.steal_folds += kind == FOLD
+                if facing and raises == 2 and s == opener:  # the opener facing a re-raise
+                    seat.reraises_faced += 1
+                    seat.reraise_folds += kind == FOLD
                 if kind == RAISE:
                     raises += 1
                     opener = s
@@ -195,6 +199,10 @@ class Tracker:
     def fold_to_bet(self, s: int) -> float:
         st = self._seat(s)
         return _estimate(st.bet_folds, st.bets_faced, PRIORS["fold_to_bet"])
+
+    def fold_to_reraise(self, s: int) -> float:
+        st = self._seat(s)
+        return _estimate(st.reraise_folds, st.reraises_faced, 0.73)
 
     def cbet(self, s: int) -> float:
         st = self._seat(s)

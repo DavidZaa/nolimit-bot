@@ -193,6 +193,10 @@ class PolicyBot(PushFoldBot):
     def _fold_marginal(self, state) -> bool:
         return self._strong_visible(state)
 
+    def _fold_to_reraise(self, seat):
+        st = self.tracker._seat(seat)
+        return self.tracker.fold_to_reraise(seat) if st.reraises_faced >= 5 else 0.73
+
     def _river_decision(self, state):
         """river_equity: on the river, with every opponent's exposed card known, act on our
         exact equity over their possible hidden cards (bot/river.py)."""

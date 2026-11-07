@@ -60,6 +60,11 @@ CAL_CALL_STACK = 0.10
 TUNED_OPEN = {"button": 0.65, "cutoff": 0.45, "sb": 0.70}
 TUNED_LATE_CALL, TUNED_EARLY_CALL, TUNED_EARLY_3BET = 0.25, 0.20, 0.04
 TUNED_CALL_STACK, TUNED_CALL_BB, TUNED_SB_STEAL_BB = 0.15, 4, 40  # no any-two SB steal at 40+ BB
+# resteal (build flag): late openers fold to re-raises 73% of the time (real data). Facing one
+# non-all-in late raise: re-raise 3x with the top RESTEAL_TOP over 25 BB, re-shove it at
+# 15-25 BB; only the top RESTEAL_STICKY vs a seat folding under 55% to re-raises (5+ seen);
+# continue against a 4-bet only with the top RESTEAL_4BET.
+RESTEAL_TOP, RESTEAL_STICKY, RESTEAL_4BET = 0.25, 0.10, 0.05
 # bubble (build flag): with 4-5 left and our stack covering everyone still to act, pressure.
 BUBBLE_PLAYERS = (4, 5)
 BUBBLE_EARLY_OPEN, BUBBLE_SHOVE = 0.50, 0.50
@@ -175,9 +180,17 @@ class PushFoldBot:
         if pct <= self._resteal_range(state, depth) and not too_deep:
             return commit(legal)
 
+        if calibrated and flag("resteal", "off") == "on" and depth >= 15 and len(
+                [r for r in state.actions if r.street == 0 and r.kind == RAISE]) == 2 and \
+                any(r.seat == seat for r in state.actions if r.street == 0 and r.kind == RAISE):
+            return commit(legal) if pct <= RESTEAL_4BET else check_or(legal, call=False)  # our 3-bet got 4-bet
         if calibrated and self._single_raise(state) is not None:
             raiser = self._single_raise(state)
             from_late = raiser in (state.button, state.sb_seat, cutoff)
+            if flag("resteal", "off") == "on" and from_late and depth >= 15 and highest < state.stacks[raiser] + state.bets[raiser]:
+                top = RESTEAL_TOP if self._fold_to_reraise(raiser) >= 0.55 else RESTEAL_STICKY
+                if pct <= top:
+                    return commit(legal) if depth <= LATE_SHOVE_BB else raise_to(legal, 3 * highest)
             late_call, early_call = (TUNED_LATE_CALL, TUNED_EARLY_CALL) if tuned else (CAL_LATE_CALL, CAL_EARLY_CALL)
             early_3bet = TUNED_EARLY_3BET if tuned else CAL_EARLY_3BET
             three_bet, call_share = (CAL_LATE_3BET, late_call) if from_late else (early_3bet, early_call)
@@ -267,6 +280,9 @@ class PushFoldBot:
     def _resteal_range(self, state, depth_bb: float) -> float:
         """Share of hands to re-shove over a raise as a resteal, on top of the usual ranges."""
         return 0.0
+
+    def _fold_to_reraise(self, seat: int) -> float:
+        return 0.73  # the policy reads its tracker
 
     def _single_raise(self, state):
         """The seat of the only preflop raise so far if nobody is in with it yet, else None."""
