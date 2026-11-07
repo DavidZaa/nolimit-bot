@@ -36,11 +36,11 @@ DEEP_SHOVE_TOP = 0.015
 # top-SURVIVE_CALL one.
 SURVIVE_BB = 25
 SURVIVE_SHOVE, SURVIVE_CALL = 0.03, 0.04
-# short_handed (build flag): in discard variants with four or fewer left, rank hands on the
-# wider best-two-cards scale for first-in opens, steals and shoves; heads-up at or under
-# HU_DEPTH_BB, the button opens or shoves the top HU_OPEN and the big blind calls a shove
-# with the top HU_CALL.
-SHORT_HANDED_PLAYERS = 4
+# short_handed (build flag): in discard variants, heads-up only, rank hands on the wider
+# best-two-cards scale for first-in opens, steals and shoves; at or under HU_DEPTH_BB the
+# button opens or shoves the top HU_OPEN and the big blind calls a shove with the top
+# HU_CALL. Three or more left: the normal ranges (measured: wider ranges there cost cashes).
+SHORT_HANDED_PLAYERS = 2
 HU_DEPTH_BB = 20
 HU_OPEN, HU_CALL = 0.70, 0.40
 DEEP_CALL = 0.08  # top share that flats a cheap raise when deep

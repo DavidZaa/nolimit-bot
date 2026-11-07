@@ -248,7 +248,7 @@ def test_short_handed_heads_up_ranges_in_the_discard_variant(monkeypatch):
     state, _ = decisions(bot, 1, "Qc9d", "Kh7s2dJc4h", stacks=stacks, others=shove)[0]
     assert bot.act(replace(state, rules=rules, hole=cards_from_str("Qc9d4s"), players_left=2)).kind in (CALL, RAISE)
     assert bot.act(replace(state, rules=rules, hole=cards_from_str("7c2d4s"), players_left=2)).kind == FOLD
-    # Five or more left, or the flag off: the normal ranges.
-    assert bot.act(replace(hu, players_left=5)).kind == FOLD
+    # Three or more left, or the flag off: the normal ranges.
+    assert bot.act(replace(hu, players_left=3)).kind == FOLD
     monkeypatch.setenv("NLB_SHORT_HANDED", "off")
     assert bot.act(hu).kind == FOLD
