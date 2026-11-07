@@ -213,15 +213,16 @@ class PushFoldBot:
         pre_raises = [r.seat for r in state.actions if r.street == 0 and r.kind == RAISE]
         if (getattr(state.rules, "discards", 0) and flag("bb_defense", "off") == "on" and seat == state.bb_seat
                 and len(pre_raises) == 1 and pre_raises[0] in (state.button, state.sb_seat)
-                and highest <= 2.5 * bb and highest < state.stacks[pre_raises[0]] + state.bets[pre_raises[0]]
+                and highest <= 3.5 * bb and highest < state.stacks[pre_raises[0]] + state.bets[pre_raises[0]]
                 and not any(r.kind == CALL and r.street == 0 for r in state.actions) and depth >= 10):
+            call_top = 0.25 if highest <= 2.5 * bb else 0.18  # bigger opens (2.5-3.5 BB): call tighter
             if depth > 20:
                 if pct <= 0.05:
                     return raise_to(legal, 3 * highest)
-                if pct <= 0.25:
+                if pct <= call_top:
                     return Action(CALL) if legal.can_call else check_or(legal, call=False)
                 return check_or(legal, call=False)
-            return commit(legal) if pct <= 0.25 else check_or(legal, call=False)
+            return commit(legal) if pct <= call_top else check_or(legal, call=False)
         if closer and len(pre_raises) == 1 and seat not in pre_raises:
             raiser = pre_raises[0]
             their_all_in = highest >= state.stacks[raiser] + state.bets[raiser]

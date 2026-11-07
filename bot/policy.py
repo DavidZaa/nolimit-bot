@@ -35,6 +35,7 @@ from __future__ import annotations
 
 from bot.flags import flag
 from bot.hands import TOP_PAIR, TWO_PAIR_PLUS, WEAK_PAIR, flush_draw, hand_strength, straight_outs, strong_draw
+from bot.handeval import hand_value
 from bot.rules import STRAIGHT
 from bot.icm import cached_bubble_factor
 from bot.preflop import ranks_for
@@ -238,6 +239,13 @@ class PolicyBot(PushFoldBot):
             if s.bucket >= TWO_PAIR_PLUS:
                 return check_or(legal, call=pot_odds)
             return None  # the usual flop logic for the rest
+        if straight_plus and len(state.board) >= 5:
+            try:  # a straight or flush the board makes on its own is a call-only hand
+                board_alone = hand_value((), state.board, rules)
+                if board_alone >= s.value:
+                    return check_or(legal, call=pot_odds)
+            except ValueError:
+                pass
         if straight_plus or a_set:
             return raise_to(legal, 3 * max(state.bets))
         if state.street == 2:  # turn
