@@ -9,6 +9,6 @@ import pytest
 
 @pytest.fixture(autouse=True)
 def _flags_off(monkeypatch):
-    for name in ("SELECT", "SHORT_HANDED", "LATE_POSITION", "CALIBRATED", "EXPOSED_READS", "RIVER_EQUITY",
+    for name in ("SELECT", "SHORT_HANDED", "LATE_POSITION", "CALIBRATED", "EXPOSED_READS", "RIVER_EQUITY", "CAL_TUNED", "RESTEAL", "BUBBLE",
                  "SURVIVAL"):
         monkeypatch.setenv(f"NLB_{name}", "off" if name != "SELECT" else "smart")
