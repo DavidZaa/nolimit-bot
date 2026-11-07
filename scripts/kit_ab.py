@@ -146,7 +146,7 @@ def main(argv=None) -> int:
         for name, (hands, vpip, shoves, (p1, p2, p3, cash, n)) in sorted(styles.items()):
             print(f"    {name:14} VPIP {100 * vpip / hands:5.1f}%  shove {100 * shoves / hands:4.1f}%  "
                   f"1st {100 * p1 / n:4.1f}%  2nd {100 * p2 / n:4.1f}%  3rd {100 * p3 / n:4.1f}%  "
-                  f"cash {100 * cash / n:4.1f}%  ({n} seat-tables)")
+                  f"cash {100 * cash / n:4.1f}%  HU win {100 * p1 / max(1, p1 + p2):4.1f}%  ({n} seat-tables)")
     m, ci = mean_ci(pooled)
     verdict = f"{a} better" if m - ci > 0 else f"{b} better" if m + ci < 0 else "no clear difference"
     print(f"pooled: {len(pooled)} tables | {a} - {b} = {m:+.2f} ± {ci:.2f} (95%): {verdict}")

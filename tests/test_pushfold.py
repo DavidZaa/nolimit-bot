@@ -228,3 +228,27 @@ def test_deep_in_the_discard_variant_only_the_very_top_stacks_off_preflop():
     # Two-card variants keep their old behaviour: kings still get it in there.
     state, plain = decisions(bot, 2, "KsKd", "Kh7s2dJc4h", stacks=stacks, others={1: Scripted(Action(RAISE, 1300))})[0]
     assert plain.kind == RAISE
+
+
+def test_short_handed_heads_up_ranges_in_the_discard_variant(monkeypatch):
+    from dataclasses import replace
+
+    from bot.discard import default_rules
+
+    rules = replace(default_rules(), seats=8)
+    monkeypatch.setenv("NLB_SHORT_HANDED", "on")
+    bot = PushFoldBot()
+    stacks = [300, 300, 0, 0, 0, 0, 0, 0]  # heads-up, 15 BB; button 0 is the small blind
+    # Button first in: a hand well outside normal ranges but inside the top 70% shoves.
+    state, plain = decisions(bot, 0, "9c6d", "Kh7s2dJc4h", stacks=stacks)[0]
+    hu = replace(state, rules=rules, hole=cards_from_str("9c6d3h"), players_left=2)
+    assert bot.act(hu).kind == RAISE and plain.kind == FOLD
+    # Big blind facing the shove: top 40% calls, the rest folds.
+    shove = {0: Scripted(Action(RAISE, 300))}
+    state, _ = decisions(bot, 1, "Qc9d", "Kh7s2dJc4h", stacks=stacks, others=shove)[0]
+    assert bot.act(replace(state, rules=rules, hole=cards_from_str("Qc9d4s"), players_left=2)).kind in (CALL, RAISE)
+    assert bot.act(replace(state, rules=rules, hole=cards_from_str("7c2d4s"), players_left=2)).kind == FOLD
+    # Five or more left, or the flag off: the normal ranges.
+    assert bot.act(replace(hu, players_left=5)).kind == FOLD
+    monkeypatch.setenv("NLB_SHORT_HANDED", "off")
+    assert bot.act(hu).kind == FOLD

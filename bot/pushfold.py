@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from bot.actions import check_or, commit, raise_to
 from bot.flags import flag
-from bot.preflop import CHEN
+from bot.preflop import CHEN, three_card_score
 from bot.hands import TOP_PAIR, TWO_PAIR_PLUS, made_hand
 from bot.state import CHECK, RAISE, Action
 
@@ -36,6 +36,13 @@ DEEP_SHOVE_TOP = 0.015
 # top-SURVIVE_CALL one.
 SURVIVE_BB = 25
 SURVIVE_SHOVE, SURVIVE_CALL = 0.03, 0.04
+# short_handed (build flag): in discard variants with four or fewer left, rank hands on the
+# wider best-two-cards scale for first-in opens, steals and shoves; heads-up at or under
+# HU_DEPTH_BB, the button opens or shoves the top HU_OPEN and the big blind calls a shove
+# with the top HU_CALL.
+SHORT_HANDED_PLAYERS = 4
+HU_DEPTH_BB = 20
+HU_OPEN, HU_CALL = 0.70, 0.40
 DEEP_CALL = 0.08  # top share that flats a cheap raise when deep
 
 
@@ -81,8 +88,17 @@ class PushFoldBot:
         pct = self.ranks.percentile(state.hole)
         depth = _depth_bb(state)
         highest = max(state.bets)
+        short = (getattr(state.rules, "discards", 0) and flag("short_handed", "off") == "on"
+                 and state.players_left <= SHORT_HANDED_PLAYERS and len(state.hole) == 3)
+        if short:
+            pct = three_card_score(state.hole)  # the wider scale
+        heads_up = short and state.players_left == 2 and depth <= HU_DEPTH_BB
 
         if highest <= bb:
+            if heads_up and seat == state.sb_seat:
+                if pct <= HU_OPEN:
+                    return commit(legal) if depth <= SHOVE_DEPTH_BB else raise_to(legal, OPEN_TO_BB * bb)
+                return check_or(legal, call=False)
             behind = self._behind(state, seat)
             widen = self._steal_widening(state, behind)
             if depth <= SHOVE_DEPTH_BB:
@@ -103,6 +119,8 @@ class PushFoldBot:
             return commit(legal)
 
         if legal.call_amount >= 0.4 * state.stacks[seat] or depth <= SHOVE_CALL_DEPTH_BB:
+            if heads_up and seat == state.bb_seat:
+                return commit(legal) if pct <= HU_CALL else check_or(legal, call=False)
             # Effectively all-in: get it in with the top of the range they'd shove.
             raiser = _last_raiser(state, 0)
             theirs = self._raiser_range(state, raiser, bb)
