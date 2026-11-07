@@ -144,6 +144,18 @@ def exposed_cards(state, log: TableLog, index: dict) -> tuple[int, ...]:
     return tuple(out)
 
 
+def dead_cards(state, log: TableLog) -> tuple[int, ...]:
+    """Every card we know is out of play: all exposed cards this hand (folded seats' too) and
+    our own discard (state.variant["discarded"], this bot's only)."""
+    out = {card_from_str(c) for c in log.exposed.values()}
+    try:
+        for c in (getattr(state, "variant", None) or {}).get("discarded", ()) or ():
+            out.add(card_from_str(str(c)))
+    except Exception:
+        pass
+    return tuple(sorted(out))
+
+
 def to_game_state(state, log: TableLog, index: dict, rules: GameRules) -> GameState:
     n = len(index)
     seats = sorted(state.seats, key=lambda s: s.seat)
@@ -171,7 +183,7 @@ def to_game_state(state, log: TableLog, index: dict, rules: GameRules) -> GameSt
         stacks=stacks, bets=bets, pot=int(state.pot), in_hand=in_hand,
         players_left=int(getattr(state, "players_remaining", 0) or sum(1 for s in stacks if s)),
         legal=legal_actions(state, stacks[me], bets[me]), actions=log.actions(),
-        rules=rules, exposed=exposed_cards(state, log, index),
+        rules=rules, exposed=exposed_cards(state, log, index), dead=dead_cards(state, log),
     )
 
 

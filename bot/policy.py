@@ -38,8 +38,10 @@ from bot.hands import TOP_PAIR, WEAK_PAIR, strong_draw
 from bot.icm import cached_bubble_factor
 from bot.preflop import ranks_for
 from bot.rules import RulesError
-from bot.state import CALL, RAISE
+from bot.state import CALL, CHECK, RAISE, Action
+from bot.actions import check_or, raise_to
 from bot.pushfold import PushFoldBot, _last_raiser, seats_behind
+from bot.river import river_equity
 from bot.tracker import PRIORS, Tracker, start_stacks
 from bot.visible import strongest_visible_seats
 
@@ -63,6 +65,10 @@ RESTEAL_FOLDS = 0.8  # the opener's fold-to-steal from which it gets re-shoved o
 RESTEAL = 0.15  # share of hands to re-shove with, before ICM and players left behind us
 LATE = 3  # an open with at most this many players left behind it (CO, button, SB)
 STEAL_SIZE_BB = 4  # opens bigger than this aren't steals
+RIVER_BUDGET_NS = 300_000  # exact river equity may spend this much of the 1 ms
+RIVER_VALUE_BET = 0.60  # equity needed to bet the river when checked to
+RIVER_RAISE = 0.85  # ... to raise a river bet
+RIVER_MARGIN = 0.03  # equity over pot odds before a river call
 
 
 class PolicyBot(PushFoldBot):
@@ -181,6 +187,27 @@ class PolicyBot(PushFoldBot):
 
     def _fold_marginal(self, state) -> bool:
         return self._strong_visible(state)
+
+    def _river_decision(self, state):
+        """river_equity: on the river, with every opponent's exposed card known, act on our
+        exact equity over their possible hidden cards (bot/river.py)."""
+        rules = state.rules
+        if (flag("river_equity", "off") != "on" or not getattr(rules, "exposes", 0)
+                or len(state.board) < rules.board_size):
+            return None
+        exposed = state.exposed
+        opponents = [exposed[s] if s < len(exposed) else -1
+                     for s in range(len(state.stacks)) if s != state.seat and state.in_hand[s]]
+        equity = river_equity(state.hole, state.board, opponents, state.dead, rules, RIVER_BUDGET_NS)
+        if equity is None:
+            return None
+        legal = state.legal
+        if legal.can_check:
+            return raise_to(legal, state.pot // 2) if equity >= RIVER_VALUE_BET else Action(CHECK)
+        if equity >= RIVER_RAISE:
+            return raise_to(legal, 3 * max(state.bets))
+        odds = legal.call_amount / max(1, state.pot + legal.call_amount)  # the pot holds their bet
+        return check_or(legal, call=equity > odds + RIVER_MARGIN)
 
     def _defends(self, state, strength):
         if "defend" not in self.active or state.street != 1 or sum(state.in_hand) != 2:

@@ -140,6 +140,7 @@ class GameState:
     actions: tuple[ActionRecord, ...]  # this hand so far, forced posts included
     rules: GameRules | None = None
     exposed: tuple[int, ...] = ()  # per seat: its exposed card this hand, -1 if none (Bay Area)
+    dead: tuple[int, ...] = ()  # cards out of play we know of: every exposed card, our discard
 
 
 @dataclass(frozen=True, slots=True)

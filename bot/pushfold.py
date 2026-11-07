@@ -123,6 +123,9 @@ class PushFoldBot:
 
     def _postflop(self, state) -> Action:
         legal = state.legal
+        exact = self._river_decision(state)
+        if exact is not None:
+            return exact
         strength = made_hand(state.hole, state.board, state.rules)
         if legal.can_check:
             size = self._bet_when_checked_to(state, strength)
@@ -172,6 +175,10 @@ class PushFoldBot:
     def _fold_marginal(self, state) -> bool:
         """Facing a bet with less than two pair: give it up (an opponent's visible hand is strong)."""
         return False
+
+    def _river_decision(self, state):
+        """A river action from exact equity, or None to use the bucket logic."""
+        return None
 
     def _defends(self, state, strength: int) -> bool:
         """Call a bet with less than top pair (the call must still be pot-sized or less)."""
