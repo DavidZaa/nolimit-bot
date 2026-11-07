@@ -57,7 +57,7 @@ CAL_EARLY_3BET, CAL_EARLY_CALL = 0.025, 0.10  # vs an earlier raise
 CAL_CALL_STACK = 0.10
 # cal_tuned (build flag): opens measured under target with CAL_OPEN, and folds to a raise
 # well under it, so wider open shares and narrower call shares.
-TUNED_OPEN = {"button": 0.75, "cutoff": 0.50, "sb": 0.75}  # field folds ~78% to steals
+TUNED_OPEN = {"button": 0.65, "cutoff": 0.45, "sb": 0.70}  # scaled back: fold-to-raise guardrail
 TUNED_LATE_CALL, TUNED_EARLY_CALL, TUNED_EARLY_3BET = 0.25, 0.10, 0.025  # early raisers: unchanged
 TUNED_CALL_STACK, TUNED_CALL_BB, TUNED_SB_STEAL_BB = 0.15, 4, 40  # no any-two SB steal at 40+ BB
 # resteal (build flag): late openers fold to re-raises 73% of the time (real data). Facing one

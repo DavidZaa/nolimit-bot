@@ -172,6 +172,13 @@ class PolicyBot(PushFoldBot):
                    and not self.tracker.inactive(s))
 
     def _bet_when_checked_to(self, state, strength):
+        size = self._bet_size_when_checked_to(state, strength)
+        if (size is not None and state.street >= 2 and flag("min_size", "off") == "on"
+                and getattr(state.rules, "exposes", 0)):
+            size = max(size, state.pot * 3 // 5)  # the field barely folds to small turn/river bets
+        return size
+
+    def _bet_size_when_checked_to(self, state, strength):
         if "cbets" not in self.active:
             return super()._bet_when_checked_to(state, strength)
         others = [s for s in range(len(state.stacks)) if s != state.seat and state.in_hand[s]]
@@ -179,6 +186,12 @@ class PolicyBot(PushFoldBot):
         if (flag("late_streets", "off") == "on" and state.street >= 3 and strength >= TWO_PAIR_PLUS
                 and self._two_pair_with_hole(state)):
             return state.pot * 3 // 4  # river value bet
+        heads_up = len(others) == 1
+        if ((flag("turn_barrel", "off") == "on" or flag("turn_semibluff", "off") == "on") and state.street == 2
+                and heads_up and _last_raiser(state, 1) == state.seat):
+            if strength >= WEAK_PAIR or strong_draw(state.hole, state.board, state.rules):
+                return state.pot * 3 // 4  # our flop bet got called: barrel with a pair or a draw
+            return None
         if strength >= TOP_PAIR:
             return state.pot * 3 // 4 if folds < STICKY else state.pot // 2
         if strength == WEAK_PAIR and folds < STICKY:
@@ -188,10 +201,9 @@ class PolicyBot(PushFoldBot):
                 and self._my_exposed_pairs_board(state) and (strength >= WEAK_PAIR
                                                              or strong_draw(state.hole, state.board, state.rules))):
             return state.pot // 2  # our exposed card pairs the flop: the field folds 66% to this bet
-        if (flag("turn_barrel", "off") == "on" and state.street == 2 and heads_up
-                and self._my_exposed_pairs_board(state) and _last_raiser(state, 1) == state.seat
-                and (strength >= WEAK_PAIR or strong_draw(state.hole, state.board, state.rules))):
-            return state.pot // 2  # our exposed-pair flop bet got called: keep betting heads-up
+        if (flag("river_bluff", "off") == "on" and state.street == 3 and heads_up and strength < WEAK_PAIR
+                and self._their_exposed_misses(state, others[0])):
+            return state.pot  # the field folds 57% to a river bet after checking to us
         if (flag("late_streets", "off") == "on" and state.street == 1 and strength < TOP_PAIR
                 and not strong_draw(state.hole, state.board, state.rules)
                 and (len(others) >= 2 or self._strong_visible(state))):
@@ -214,6 +226,11 @@ class PolicyBot(PushFoldBot):
         board_ranks = {c >> 2 for c in state.board}
         hole_ranks = [c >> 2 for c in state.hole]
         return any(r in board_ranks for r in hole_ranks) or (len(hole_ranks) == 2 and hole_ranks[0] == hole_ranks[1])
+
+    def _their_exposed_misses(self, state, seat) -> bool:
+        exposed = getattr(state, "exposed", ())
+        card = exposed[seat] if seat < len(exposed) else -1
+        return card >= 0 and (card >> 2) not in {c >> 2 for c in state.board}
 
     def _my_exposed_pairs_board(self, state) -> bool:
         exposed = getattr(state, "exposed", ())
@@ -260,8 +277,11 @@ class PolicyBot(PushFoldBot):
                 pass
         if straight_plus or a_set:
             return raise_to(legal, 3 * max(state.bets))
-        if state.street == 2:  # turn
-            return check_or(legal, call=two_pair_plus_hole or s.bucket == TOP_PAIR or (draw and pot_odds))
+        if state.street == 2:  # turn: the field's turn bets are mostly two pair plus
+            bet = legal.call_amount
+            before = state.pot - bet
+            return check_or(legal, call=(two_pair_plus_hole or a_set) or (draw and bet * 2 <= before)
+                            or (s.bucket == TOP_PAIR and bet * 3 <= before))
         # river
         if self._strong_visible(state):
             return check_or(legal, call=False)
