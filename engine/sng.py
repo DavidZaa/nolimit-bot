@@ -33,7 +33,9 @@ def assign_places(seats, key_stacks, best_place: int, payouts) -> dict[int, tupl
 
     Returns seat -> (place, points). Seats with exactly equal stacks share the
     average place and the average points of the places they cover.
-    PLACEHOLDER(kit): confirm the kit breaks same-hand busts this way.
+    PLACEHOLDER(kit): the published format says busted bots score their place and the
+    cap splits the rest by ICM, but not how same-hand busts are ordered; confirm against
+    the engine in the kit's sdk/ at kickoff.
     """
     ordered = sorted(seats, key=lambda s: -key_stacks[s])
     out: dict[int, tuple[float, float]] = {}

@@ -148,11 +148,15 @@ def test_the_runner_and_the_agent_play_the_same_strategy():
     assert type(adapter.build_bot().inner) is type(BOTS["ours"](0, TableConfig()).inner)
 
 
-def test_the_bot_and_the_simulator_use_the_one_default_points_setting():
+def test_the_simulator_scores_by_exactly_the_payouts_the_bot_plays_for():
+    # No default in the bot: the simulator hands its payouts to the bot through the rules.
     from bot import icm
-    from engine.rules import PLACEHOLDER_PAYOUTS
+    from engine.rules import game_rules
 
-    assert PLACEHOLDER_PAYOUTS is icm.PAYOUTS and TableConfig().payouts is icm.PAYOUTS
+    assert not hasattr(icm, "PAYOUTS")
+    for payouts in ((50, 30, 20, 0, 0, 0, 0, 0), (30, 20, 15, 12, 9, 7, 5, 2), (100,)):
+        config = TableConfig(payouts=payouts)
+        assert game_rules(config).payouts[:len(payouts)] == tuple(float(p) for p in payouts)
 
 
 def test_importing_the_agent_builds_every_registered_variants_tables():

@@ -10,14 +10,24 @@ Equity is Malmuth-Harville (the model the tournament itself uses to split
 points at the hand cap), but only for one seat, and only as deep as the
 payouts differ: everything is measured relative to the last open place, so
 50/30/20 with eight players left only looks three places deep.
+
+Payouts are always the table's own (GameRules.payouts, from state.config);
+there is no default here, so nothing can fall back to 50/30/20 unnoticed.
+
+The bubble factor is an approximation of deciding by expected points
+directly: it prices an even flip with no dead money. scripts/icm_check.py
+measures it against the exact expected-points threshold for an all-in call
+with blinds in the pot: mean gap 0.5-1.2 equity points under top-2, top-3
+and flat payouts, 0.4-1.2% of decisions flipped for hands of random equity,
+exact under winner-take-all, with rare outliers (up to ~0.55) where the
+factor hits its clamp. How the policy turns the factor into a narrower
+range is a further heuristic, measured by A/B (the icm feature) instead.
 """
 
 from __future__ import annotations
 
 from functools import lru_cache
 
-# Points by finishing place, 1st first. PLACEHOLDER(kit): set from the announced points.
-PAYOUTS = (50.0, 30.0, 20.0, 0.0, 0.0, 0.0, 0.0, 0.0)
 # Below 1 is real (a big stack calling a short one on the bubble gains from
 # busting it), but never so far that a range divided by it blows up.
 MIN_BUBBLE_FACTOR, MAX_BUBBLE_FACTOR = 0.25, 4.0
@@ -37,8 +47,9 @@ def _tables(k: int):
 _TABLES = [_tables(k) for k in range(MAX_SEATS)]
 
 
-def seat_equity(totals, seat: int, payouts=PAYOUTS) -> float:
-    """Expected points for `seat` given every seat's chips (0 for busted seats)."""
+def seat_equity(totals, seat: int, payouts) -> float:
+    """Expected points for `seat` given every seat's chips (0 for busted seats). A seat with
+    no chips gets 0 here: the points of the place it busted in are scored separately."""
     me = totals[seat]
     if me <= 0:
         return 0.0
@@ -77,7 +88,7 @@ def seat_equity(totals, seat: int, payouts=PAYOUTS) -> float:
     return equity
 
 
-def bubble_factor(totals, me: int, opp: int, payouts=PAYOUTS) -> float:
+def bubble_factor(totals, me: int, opp: int, payouts) -> float:
     """Points lost by losing an all-in to `opp`, over points won by winning it.
 
     Both sides of the flip are the smaller of the two stacks; 1.0 means chips

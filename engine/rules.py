@@ -9,7 +9,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from functools import lru_cache
 
-from bot.icm import PAYOUTS
 # Hand categories live with the bot's rules so the simulator and the bot share one definition.
 from bot.rules import (  # noqa: F401  (re-exported for engine code and tests)
     CATEGORY_NAMES, FLUSH, FULL_HOUSE, HIGH_CARD, PAIR, QUADS, SHORT_DECK_ORDER, STANDARD_ORDER, STRAIGHT,
@@ -147,16 +146,17 @@ def parse_schedule(spec: str, hands_per_level: int | None = None) -> BlindSchedu
         levels = tuple(levels)
     return BlindSchedule(levels, hands_per_level or 20)
 
-# Points by finishing place. One setting, in bot/icm.py, so the simulator
-# always scores by the same points the bot plays for.
-PLACEHOLDER_PAYOUTS = PAYOUTS
+# The published default table payouts (1st 50, 2nd 30, 3rd 20, 4th-8th 0). Simulator
+# config only: the bot never assumes them, it reads each table's payouts from its rules,
+# which the simulator builds from TableConfig.payouts, so both always use the same vector.
+DEFAULT_PAYOUTS = (50.0, 30.0, 20.0, 0.0, 0.0, 0.0, 0.0, 0.0)
 
 
 @dataclass(frozen=True)
 class TableConfig:
     variant: Variant = NLHE
     schedule: BlindSchedule = DOUBLING
-    payouts: tuple[float, ...] = PLACEHOLDER_PAYOUTS
+    payouts: tuple[float, ...] = DEFAULT_PAYOUTS
     seats: int = 8
     starting_stack: int = 2000
     max_hands: int = 250  # the published hand cap

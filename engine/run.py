@@ -27,7 +27,7 @@ from engine.field import CallingStation, ChenTAG, EquityCaller, FolderBot, Mania
 from engine.field_llm import llm1_strong, llm2_tag, llm3_montecarlo, llm4_pushfold
 from engine.latency import LatencyHistogram
 from engine.rules import (
-    NLHE, PLACEHOLDER_PAYOUTS, SCHEDULE_SPEC_HELP, VARIANT_SPEC_HELP, TableConfig, parse_schedule,
+    DEFAULT_PAYOUTS, NLHE, SCHEDULE_SPEC_HELP, VARIANT_SPEC_HELP, TableConfig, parse_schedule,
     parse_variant,
 )
 from engine.sng import play_sng
@@ -214,8 +214,8 @@ def add_table_args(p: argparse.ArgumentParser) -> None:
     p.add_argument("--schedule", default="doubling", help=SCHEDULE_SPEC_HELP)
     p.add_argument("--hands-per-level", type=int, default=20)
     p.add_argument("--stack", type=int, default=2000, help="starting stack")
-    p.add_argument("--payouts", default=",".join(f"{x:g}" for x in PLACEHOLDER_PAYOUTS),
-                   help="points by finishing place, 1st first (default: PAYOUTS in bot/icm.py)")
+    p.add_argument("--payouts", default=",".join(f"{x:g}" for x in DEFAULT_PAYOUTS),
+                   help="points by finishing place, 1st first (default: the published 50/30/20)")
     p.add_argument("--max-hands", type=int, default=250)
     p.add_argument("--no-enforce-time", action="store_true",
                    help="don't auto-fold decisions that take more than 1 ms of CPU")
