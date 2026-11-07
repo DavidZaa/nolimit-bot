@@ -14,6 +14,7 @@ tuned, so the two are kept separate on purpose.
 from __future__ import annotations
 
 from bot.actions import check_or, commit, raise_to
+from bot.flags import flag
 from bot.preflop import CHEN
 from bot.hands import TOP_PAIR, TWO_PAIR_PLUS, made_hand
 from bot.state import CHECK, RAISE, Action
@@ -30,6 +31,11 @@ DISCARD_CALL_SCALE = 0.8
 # from 60+ BB stack-offs.
 DEEP_SHOVE_BB = 40
 DEEP_SHOVE_TOP = 0.015
+# Survival (build flag survival=on): with four or more players left and more than
+# SURVIVE_BB effective, a preflop shove needs a top-SURVIVE_SHOVE hand and an all-in call a
+# top-SURVIVE_CALL one.
+SURVIVE_BB = 25
+SURVIVE_SHOVE, SURVIVE_CALL = 0.03, 0.04
 DEEP_CALL = 0.08  # top share that flats a cheap raise when deep
 
 
@@ -87,7 +93,12 @@ class PushFoldBot:
                 return raise_to(legal, OPEN_TO_BB * bb)
             return check_or(legal, call=False)
 
-        too_deep = (getattr(state.rules, "discards", 0) and depth > DEEP_SHOVE_BB and pct > DEEP_SHOVE_TOP)
+        discard_variant = bool(getattr(state.rules, "discards", 0))
+        too_deep = discard_variant and depth > DEEP_SHOVE_BB and pct > DEEP_SHOVE_TOP
+        survive = (discard_variant and flag("survival", "off") == "on" and state.players_left >= 4
+                   and depth > SURVIVE_BB)
+        if survive and pct > SURVIVE_SHOVE:
+            too_deep = True  # no re-shove either
         if pct <= self._resteal_range(state, depth) and not too_deep:
             return commit(legal)
 
@@ -98,6 +109,9 @@ class PushFoldBot:
             waiting = self._still_to_act(state, seat, raiser)
             scale = DISCARD_CALL_SCALE if getattr(state.rules, "discards", 0) else 1.0
             if pct <= theirs * 0.7 * scale / (1 + 0.5 * waiting) / self._call_tightness(state, raiser):
+                calling = not legal.can_raise or legal.call_amount >= state.stacks[seat]
+                if survive and pct > (SURVIVE_CALL if calling else SURVIVE_SHOVE):
+                    return check_or(legal, call=False)
                 if not too_deep:
                     return commit(legal)
             return check_or(legal, call=False)
@@ -116,6 +130,8 @@ class PushFoldBot:
         if strength >= TWO_PAIR_PLUS:
             return raise_to(legal, 3 * max(state.bets))
         pot_sized_or_less = legal.call_amount * 2 <= state.pot  # the pot already holds the bet
+        if self._fold_marginal(state):
+            return check_or(legal, call=False)  # a visible hand beats a marginal one
         stays = strength >= TOP_PAIR or self._defends(state, strength)
         return check_or(legal, call=stays and pot_sized_or_less)
 
@@ -152,6 +168,10 @@ class PushFoldBot:
     def _resteal_range(self, state, depth_bb: float) -> float:
         """Share of hands to re-shove over a raise as a resteal, on top of the usual ranges."""
         return 0.0
+
+    def _fold_marginal(self, state) -> bool:
+        """Facing a bet with less than two pair: give it up (an opponent's visible hand is strong)."""
+        return False
 
     def _defends(self, state, strength: int) -> bool:
         """Call a bet with less than top pair (the call must still be pot-sized or less)."""

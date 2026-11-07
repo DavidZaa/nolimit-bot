@@ -68,10 +68,28 @@ def table_points(history: Path, styles: dict | None = None) -> list[dict]:
                         shoves.add(seat)
                 for i, label in enumerate(seats):
                     if hand["stacks_before"][i] > 0:
-                        st = styles.setdefault(label.split("#")[0], [0, 0, 0])
+                        st = styles.setdefault(label.split("#")[0], [0, 0, 0, [0, 0, 0, 0, 0]])
                         st[0] += 1
                         st[1] += i in vpip
                         st[2] += i in shoves
+            # Places: survivors by final chips, busted seats by how long they lasted.
+            hands = rec["hands"]
+            bust_hand = {}
+            for n, hand in enumerate(hands):
+                for i in range(len(seats)):
+                    if hand["stacks_before"][i] > 0 and hand["stacks_after"][i] == 0:
+                        bust_hand[i] = (n, hand["stacks_before"][i])
+            final = hands[-1]["stacks_after"]
+            order = sorted(range(len(seats)), key=lambda i: (final[i] > 0, final[i] if final[i] else 0,
+                                                             bust_hand.get(i, (10**9, 0))), reverse=True)
+            paid = sum(1 for x in rec.get("payouts", (1, 1, 1)) if x)
+            for place, i in enumerate(order, 1):
+                st = styles.setdefault(seats[i].split("#")[0], [0, 0, 0, [0, 0, 0, 0, 0]])
+                st[3][4] += 1
+                if place <= 3:
+                    st[3][place - 1] += 1
+                if place <= paid:
+                    st[3][3] += 1
     return out
 
 
@@ -125,8 +143,10 @@ def main(argv=None) -> int:
         print(f"seed {seed}: {len(tables)} tables | {a} {sum(a_pts) / len(a_pts):6.2f}  {b} "
               f"{sum(b_pts) / len(b_pts):6.2f} | {a} - {b} = {m:+.2f} ± {ci:.2f} (95%) | "
               f"failed decisions: {failed or 0}")
-        for name, (hands, vpip, shoves) in sorted(styles.items()):
-            print(f"    {name:14} VPIP {100 * vpip / hands:5.1f}%  shove {100 * shoves / hands:4.1f}%  ({hands} hands)")
+        for name, (hands, vpip, shoves, (p1, p2, p3, cash, n)) in sorted(styles.items()):
+            print(f"    {name:14} VPIP {100 * vpip / hands:5.1f}%  shove {100 * shoves / hands:4.1f}%  "
+                  f"1st {100 * p1 / n:4.1f}%  2nd {100 * p2 / n:4.1f}%  3rd {100 * p3 / n:4.1f}%  "
+                  f"cash {100 * cash / n:4.1f}%  ({n} seat-tables)")
     m, ci = mean_ci(pooled)
     verdict = f"{a} better" if m - ci > 0 else f"{b} better" if m + ci < 0 else "no clear difference"
     print(f"pooled: {len(pooled)} tables | {a} - {b} = {m:+.2f} ± {ci:.2f} (95%): {verdict}")

@@ -33,6 +33,7 @@ than playing hold'em with 50/30/20 by default.
 
 from __future__ import annotations
 
+from bot.flags import flag
 from bot.hands import TOP_PAIR, WEAK_PAIR, strong_draw
 from bot.icm import cached_bubble_factor
 from bot.preflop import ranks_for
@@ -40,6 +41,7 @@ from bot.rules import RulesError
 from bot.state import CALL, RAISE
 from bot.pushfold import PushFoldBot, _last_raiser, seats_behind
 from bot.tracker import PRIORS, Tracker, start_stacks
+from bot.visible import strongest_visible_seats
 
 FEATURES = ("shoves", "steals", "cbets", "broken", "icm", "defend")
 V4_FEATURES = ("shoves", "steals", "cbets", "broken")
@@ -167,9 +169,18 @@ class PolicyBot(PushFoldBot):
             return state.pot // 2
         heads_up = len(others) == 1
         cbet = state.street == 1 and heads_up and _last_raiser(state, 0) == state.seat
-        if cbet and folds >= CBET_FOLDS:
-            return state.pot // 2
+        if cbet and folds >= CBET_FOLDS and not self._strong_visible(state):
+            return state.pot // 2  # a bluff, never into a hand we can see is strong
         return None
+
+    def _strong_visible(self, state) -> bool:
+        """exposed_reads: an opponent still in whose exposed card pairs the board or better."""
+        if flag("exposed_reads", "off") != "on":
+            return False
+        return bool(strongest_visible_seats(state))
+
+    def _fold_marginal(self, state) -> bool:
+        return self._strong_visible(state)
 
     def _defends(self, state, strength):
         if "defend" not in self.active or state.street != 1 or sum(state.in_hand) != 2:
