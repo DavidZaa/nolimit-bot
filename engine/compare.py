@@ -18,7 +18,7 @@ import argparse
 import math
 import sys
 from concurrent.futures import ProcessPoolExecutor
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from engine.rules import TableConfig
 from engine.run import BOTS, add_table_args, parse_lineup, seat_names, table_config
@@ -41,10 +41,27 @@ class Comparison:
     errors: int = 0
     timeouts: int = 0
     illegal: int = 0
+    # Both arms, in full: [candidate, reference] for each.
+    arm_decisions: list = field(default_factory=lambda: [0, 0])
+    arm_errors: list = field(default_factory=lambda: [0, 0])  # exceptions the table saw
+    arm_timeouts: list = field(default_factory=lambda: [0, 0])
+    arm_illegal: list = field(default_factory=lambda: [0, 0])
+    arm_absorbed: list = field(default_factory=lambda: [0, 0])  # exceptions SafeBot caught
+    arm_repaired: list = field(default_factory=lambda: [0, 0])  # illegal actions SafeBot mended
+    # Hero finishes by place (index 0 = 1st), tied places split evenly.
+    arm_finishes: list = field(default_factory=lambda: [[0.0] * 10, [0.0] * 10])
 
     def merge(self, other: "Comparison") -> None:
         for name in self.__dataclass_fields__:
-            setattr(self, name, getattr(self, name) + getattr(other, name))
+            mine, theirs = getattr(self, name), getattr(other, name)
+            if isinstance(mine, list):
+                for i, value in enumerate(theirs):
+                    if isinstance(value, list):
+                        mine[i] = [a + b for a, b in zip(mine[i], value)]
+                    else:
+                        mine[i] += value
+            else:
+                setattr(self, name, mine + theirs)
 
     @property
     def mean_diff(self) -> float:
@@ -80,6 +97,16 @@ def _hero_lineup(spec: str) -> list[str]:
     return [HERO] * heroes + (parse_lineup(rest) if rest else [])
 
 
+def _add_finish(counts: list, place: float) -> None:
+    """Count a finish; a tied place like 6.5 counts half to 6th and half to 7th."""
+    lo = int(place)
+    if place == lo:
+        counts[lo - 1] += 1
+    else:
+        counts[lo - 1] += lo + 1 - place
+        counts[lo] += place - lo
+
+
 def _run_chunk(candidate, reference, lineup, start, count, seed, config) -> Comparison:
     out = Comparison()
     for t in range(start, start + count):
@@ -91,8 +118,16 @@ def _run_chunk(candidate, reference, lineup, start, count, seed, config) -> Comp
                     for s, name in enumerate(names)]
             res = play_sng(bots, config, seed=table_seed)
             points.append(sum(res.points[s] for s in heroes) / len(heroes))
+            st = res.stats
+            out.arm_decisions[arm] += sum(st.decisions[s] for s in heroes)
+            out.arm_errors[arm] += sum(st.errors[s] for s in heroes)
+            out.arm_timeouts[arm] += sum(st.timeouts[s] for s in heroes)
+            out.arm_illegal[arm] += sum(st.illegal[s] for s in heroes)
+            out.arm_absorbed[arm] += sum(getattr(bots[s], "errors", 0) for s in heroes)
+            out.arm_repaired[arm] += sum(getattr(bots[s], "repairs", 0) for s in heroes)
+            for s in heroes:
+                _add_finish(out.arm_finishes[arm], res.finish[s])
             if arm == 0:
-                st = res.stats
                 out.decisions += sum(st.decisions[s] for s in heroes)
                 out.errors += sum(st.errors[s] for s in heroes)
                 out.timeouts += sum(st.timeouts[s] for s in heroes)

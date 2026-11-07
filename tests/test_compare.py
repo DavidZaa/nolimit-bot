@@ -60,3 +60,30 @@ def test_cli_reports_the_difference_and_a_verdict(capsys):
     main(["--candidate", "ours", "--reference", "baseline", "--tables", "40", "--no-enforce-time"])
     out = capsys.readouterr().out
     assert "difference" in out and "(95%)" in out and "paired tables" in out
+
+
+def test_an_evaluation_is_reproducible_from_its_record(tmp_path):
+    import json
+
+    from engine.evaluate import main
+
+    a, b = tmp_path / "a.json", tmp_path / "b.json"
+    argv = ["--candidate", "v4", "--baseline", "ours", "--tables", "6", "--seeds", "3,4",
+            "--mixtures", "target,random", "--no-enforce-time"]
+    main(argv + ["--out", str(a)])
+    first = json.loads(a.read_text())
+    # Rerun from nothing but the record: same candidate, baseline, seeds, mixtures, rules.
+    rerun = ["--candidate", first["candidate"], "--baseline", first["baseline"], "--tables", str(first["tables"]),
+             "--seeds", ",".join(map(str, first["seeds"])), "--mixtures", ",".join(first["mixtures"]),
+             "--payouts", ",".join(f"{p:g}" for p in first["rules"]["payouts"]), "--no-enforce-time"]
+    main(rerun + ["--out", str(b)])
+    second = json.loads(b.read_text())
+    strip = lambda rows: [{k: v for k, v in r.items() if k != "seconds"} for r in rows]  # noqa: E731
+    assert strip(first["results"]) == strip(second["results"])
+    assert len(first["results"]) == 4 and first["environment"]["revision"]
+    row = first["results"][0]
+    for arm in ("candidate", "baseline"):
+        for key in ("points_per_table", "ci95", "finish_share", "exceptions", "timeouts", "illegal",
+                    "safebot_absorbed", "safebot_repaired"):
+            assert key in row[arm]
+        assert abs(sum(row[arm]["finish_share"]) - 1) < 1e-3  # rounded to 4 places

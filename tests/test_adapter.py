@@ -169,3 +169,16 @@ def test_importing_the_agent_builds_every_registered_variants_tables():
         misses = handeval._tables.cache_info().misses
         handeval.warm(rules)
         assert handeval._tables.cache_info().misses == misses, variant
+
+
+def test_the_benchmark_fails_loudly_on_rules_errors_and_passes_a_clean_run(capsys):
+    from scripts.bench_act import main
+
+    assert main(["--tables", "2", "--strict"]) == 0
+    clean = capsys.readouterr().out
+    assert "rules errors 0" in clean and "over 1 ms" in clean and "drain" in clean
+    adapter._reported.clear()
+    # A variant the bot has no rules for: every decision checks/folds, and strict mode says so.
+    assert main(["--tables", "1", "--strict", "--variant", "base=nlhe,hole=3"]) == 1
+    assert "RULES ERROR" in capsys.readouterr().out
+    adapter._reported.clear()

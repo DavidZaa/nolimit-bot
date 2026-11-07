@@ -41,10 +41,17 @@ def make_legal(action, legal: LegalActions) -> Action:
 
 
 class SafeBot:
-    """Wraps any bot so that nothing it does can produce an illegal action."""
+    """Wraps any bot so that nothing it does can produce an illegal action.
+
+    It counts what it had to absorb, so evaluations can report it: `errors` (the
+    strategy raised; the fallback played) and `repairs` (it returned something
+    illegal that was mended into a legal action).
+    """
 
     def __init__(self, inner):
         self.inner = inner
+        self.errors = 0
+        self.repairs = 0
 
     def new_table(self, seat: int, num_seats: int) -> None:
         hook = getattr(self.inner, "new_table", None)
@@ -65,6 +72,11 @@ class SafeBot:
     def act(self, state) -> Action:
         legal = state.legal
         try:
-            return make_legal(self.inner.act(state), legal)
+            wanted = self.inner.act(state)
         except Exception:
+            self.errors += 1
             return fallback_action(legal)
+        action = make_legal(wanted, legal)
+        if action != wanted:
+            self.repairs += 1
+        return action

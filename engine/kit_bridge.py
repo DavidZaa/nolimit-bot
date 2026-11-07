@@ -30,6 +30,8 @@ class KitSeat:
     def __init__(self, agent_cls, config, fresh_agent: bool = True):
         self.agent_cls, self.config, self.fresh = agent_cls, config, fresh_agent
         self.agent = agent_cls()
+        self.wall_ns: list[int] = []  # this seat's act() times at this table
+        self.cpu_ns: list[int] = []
         self.new_table(0, config.seats)
 
     def new_table(self, seat: int, num_seats: int) -> None:
@@ -98,8 +100,11 @@ class KitSeat:
         agent = self.agent_cls() if self.fresh else self.agent
         t0, c0 = time.perf_counter_ns(), time.thread_time_ns()
         kit_action, memory = agent.act(state, self.memory)
-        LATENCIES_NS.append(time.perf_counter_ns() - t0)
-        CPU_NS.append(time.thread_time_ns() - c0)
+        wall, cpu = time.perf_counter_ns() - t0, time.thread_time_ns() - c0
+        LATENCIES_NS.append(wall)
+        CPU_NS.append(cpu)
+        self.wall_ns.append(wall)
+        self.cpu_ns.append(cpu)
         if isinstance(memory, (bytes, bytearray)):
             self.memory = bytes(memory[: state.config.memory_bytes])
         kind = getattr(kit_action, "kind", None)
