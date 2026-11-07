@@ -72,7 +72,14 @@ FIGHT_BB, FIGHT_SHARE = 30, 0.40
 # with the top 35%, call their all-ins with the top 30%.
 DEEP_BB, DEEP_WIDEN, DEEP_OPEN_BB = 40, 1.5, 3
 DEEP_CALL_IP, DEEP_CALL_BB = 0.30, 0.40
-CLOSER_PLAYERS, CLOSER_OPEN, CLOSER_RESHOVE, CLOSER_CALL = (3, 4, 5), 0.70, 0.35, 0.30  # re-raised after our open at <= 30 BB: shove the top 40% of the open range
+CLOSER_PLAYERS, CLOSER_OPEN, CLOSER_RESHOVE, CLOSER_CALL = (3, 4, 5), 0.70, 0.35, 0.30
+# deep_lite (build flag): 40+ BB, cutoff/button opens 1.3x wider; button calls opens up to 3 BB with the top 20%.
+LITE_WIDEN, LITE_CALL = 1.3, 0.20
+# deep_fight (build flag): over 30 BB, after our open gets one non-all-in re-raise: 4-bet
+# shove the top 12% of the opening range at <= 60 BB, 4-bet to 2.3x their raise with the top
+# 8% above (fold to a 5-bet unless top 3%); call with the next 25% in position when the
+# re-raise is <= 3.5x our open.
+DF_SHOVE_BB, DF_SHOVE_TOP, DF_4BET_TOP, DF_4BET_X, DF_5BET_TOP, DF_CALL_NEXT, DF_CALL_X = 60, 0.12, 0.08, 2.3, 0.03, 0.25, 3.5  # re-raised after our open at <= 30 BB: shove the top 40% of the open range
 # bubble (build flag): with 4-5 left and our stack covering everyone still to act, pressure.
 BUBBLE_PLAYERS = (4, 5)
 BUBBLE_EARLY_OPEN, BUBBLE_SHOVE = 0.50, 0.50
@@ -140,6 +147,7 @@ class PushFoldBot:
         bubble = (getattr(state.rules, "discards", 0) and flag("bubble", "off") == "on"
                   and state.players_left in BUBBLE_PLAYERS)
         deep_flag = getattr(state.rules, "discards", 0) and flag("deep", "off") == "on" and depth >= DEEP_BB
+        lite = getattr(state.rules, "discards", 0) and flag("deep_lite", "off") == "on" and depth >= DEEP_BB
         mine_total = state.stacks[seat] + state.bets[seat]
         closer = (getattr(state.rules, "discards", 0) and flag("closer", "off") == "on"
                   and state.players_left in CLOSER_PLAYERS
@@ -169,6 +177,8 @@ class PushFoldBot:
                 return check_or(legal, call=False)
             if deep_flag and len(behind) <= 4:
                 widen *= DEEP_WIDEN
+            if lite and seat in (state.button, cutoff):
+                widen *= LITE_WIDEN
             if closer and depth > SHOVE_DEPTH_BB:
                 if seat in (state.button, state.sb_seat) or pct <= CLOSER_OPEN:
                     return raise_to(legal, OPEN_TO_BB * bb)
@@ -183,7 +193,8 @@ class PushFoldBot:
                     "cutoff" if seat == cutoff else None)
                 if position is not None:
                     steal = widen == float("inf") and not (tuned and position == "sb" and depth >= TUNED_SB_STEAL_BB)
-                    if pct <= open_shares[position] or steal:
+                    share = open_shares[position] * (LITE_WIDEN if lite and position != "sb" else 1.0)
+                    if pct <= share or steal:
                         return raise_to(legal, OPEN_TO_BB * bb)
                     return check_or(legal, call=False)
             if pct <= 0.45 / max(len(behind), 1) ** 0.8 * widen:
@@ -212,14 +223,36 @@ class PushFoldBot:
             in_position = seat in (state.button, cutoff)
             if (in_position and pct <= DEEP_CALL_IP) or (seat == state.bb_seat and pct <= DEEP_CALL_BB):
                 return Action(CALL)
+        if (lite and len(pre_raises) == 1 and seat not in pre_raises and seat == state.button
+                and highest <= DEEP_OPEN_BB * bb and highest < state.stacks[pre_raises[0]] + state.bets[pre_raises[0]]
+                and legal.can_call and pct <= LITE_CALL
+                and not any(r.kind == CALL and r.street == 0 for r in state.actions)):
+            return Action(CALL)
         if calibrated and flag("resteal", "off") == "on" and seat in pre_raises and depth >= 15:
-            if len(pre_raises) == 2 and pre_raises[0] == seat and depth <= FIGHT_BB:  # our open got re-raised
+            if len(pre_raises) == 2 and pre_raises[0] == seat:  # our open got re-raised
                 position = "button" if seat == state.button else "sb" if seat == state.sb_seat else (
                     "cutoff" if seat == cutoff else None)
-                share = FIGHT_SHARE * (open_shares[position] if position else 0.45 / 3 ** 0.8)
-                return commit(legal) if pct <= share else check_or(legal, call=False)
-            if len(pre_raises) >= 3 and pre_raises[-2] == seat:  # our 3-bet got 4-bet
-                return commit(legal) if pct <= RESTEAL_4BET else check_or(legal, call=False)
+                open_share = open_shares[position] if position else 0.45 / 3 ** 0.8
+                if depth <= FIGHT_BB:
+                    return commit(legal) if pct <= FIGHT_SHARE * open_share else check_or(legal, call=False)
+                if flag("deep_fight", "off") == "on":
+                    raiser = pre_raises[1]
+                    their_all_in = highest >= state.stacks[raiser] + state.bets[raiser]
+                    my_open = next(r.amount for r in state.actions if r.street == 0 and r.kind == RAISE and r.seat == seat)
+                    if not their_all_in:
+                        if depth <= DF_SHOVE_BB and pct <= DF_SHOVE_TOP * open_share:
+                            return commit(legal)
+                        if depth > DF_SHOVE_BB and pct <= DF_4BET_TOP * open_share:
+                            return raise_to(legal, DF_4BET_X * highest)
+                        in_position = raiser in (state.sb_seat, state.bb_seat) or raiser not in seats_behind(state, seat)
+                        top_part = (DF_SHOVE_TOP if depth <= DF_SHOVE_BB else DF_4BET_TOP) * open_share
+                        if (in_position and highest <= DF_CALL_X * my_open and legal.can_call
+                                and pct <= (top_part + DF_CALL_NEXT * open_share)):
+                            return Action(CALL)
+                        return check_or(legal, call=False)
+            if len(pre_raises) >= 3 and pre_raises[-2] == seat:  # our 3-bet got 4-bet (or our 4-bet a 5-bet)
+                top = DF_5BET_TOP if flag("deep_fight", "off") == "on" and depth > FIGHT_BB else RESTEAL_4BET
+                return commit(legal) if pct <= top else check_or(legal, call=False)
             if state.players_left == 2:  # heads-up: never flat-call a re-raise of our own open
                 return commit(legal) if pct <= RESTEAL_4BET else check_or(legal, call=False)
         if calibrated and self._single_raise(state) is not None:

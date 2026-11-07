@@ -45,6 +45,7 @@ def build(spec: str, base: Path, work: Path) -> tuple[str, Path]:
 
 opens: dict = {}  # label -> non-all-in first-in open sizes in big blinds
 flops: dict = {}  # label -> hands in which the seat saw the flop
+reraises: dict = {}  # label -> [opens that got re-raised, folds to it]
 positions: dict = {}  # label -> position -> [hands there, first-in raises there]
 
 
@@ -64,6 +65,7 @@ def table_points(history: Path, styles: dict | None = None) -> list[dict]:
             for hand in rec["hands"]:
                 preflop, vpip, shoves = True, set(), set()
                 raised, first_in, faced, folded_to = False, set(), set(), set()
+                opener, reraised, open_folds = None, False, set()
                 alive = [i for i in range(len(seats)) if hand["stacks_before"][i] > 0]
                 button = hand["button"]
                 after = [i for i in alive if i > button] + [i for i in alive if i < button]  # after the button
@@ -83,14 +85,19 @@ def table_points(history: Path, styles: dict | None = None) -> list[dict]:
                         preflop = False
                     elif preflop and kind == "fold" and seat is not None:
                         folded_pre.add(seat)
+                        if reraised and seat == opener:
+                            open_folds.add(seat)
                         if raised:
                             faced.add(seat)
                             folded_to.add(seat)
                     elif preflop and kind in ("call", "raise") and seat is not None:
                         vpip.add(seat)
                         if kind == "raise":
+                            if raised and opener is not None and not reraised:
+                                reraised = True
                             if not raised and seat not in vpip - {seat}:
                                 first_in.add(seat)
+                                opener = seat
                                 if ev.get("amount", 0) < hand["stacks_before"][seat]:
                                     opens.setdefault(seats[seat].split("#")[0], []).append(ev["amount"] / bb_size)
                             raised = True
@@ -109,6 +116,10 @@ def table_points(history: Path, styles: dict | None = None) -> list[dict]:
                         st[2] += i in shoves
                         st[4] += i in first_in
                         flops[label.split("#")[0]] = flops.get(label.split("#")[0], 0) + (i in saw_flop)
+                        if reraised and i == opener:
+                            rr = reraises.setdefault(label.split("#")[0], [0, 0])
+                            rr[0] += 1
+                            rr[1] += i in open_folds
                         st[5] += i in faced
                         st[6] += i in folded_to
                         if i in pos:
@@ -199,6 +210,8 @@ def main(argv=None) -> int:
             sizes = opens.get(name, [])
             size = f"open size {sum(sizes) / len(sizes):.1f} BB" if sizes else ""
             size += f"  flops/table {flops.get(name, 0) / max(1, n):.1f}"
+            rr = reraises.get(name, [0, 0])
+            size += f"  fold-after-reraise {100 * rr[1] / max(1, rr[0]):.0f}% ({rr[0]})"
             print(f"    {name:14} VPIP {100 * vpip / hands:5.1f}%  shove {100 * shoves / hands:4.1f}%  "
                   f"first-in raise {100 * opens_ / hands:4.1f}%  fold-to-raise {100 * folds / max(1, faced):4.1f}%  "
                   f"{where}  {size}\n{' ' * 19}"
