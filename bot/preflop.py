@@ -32,6 +32,25 @@ from itertools import combinations
 
 from bot.baseline import preflop_percentile as chen_percentile
 
+# Three-card hands (the discard variant) with no table of their own: the best two-card
+# hand among the three, made a little better when all three share a suit or run together
+# (more ways to flop a flush or straight draw worth keeping). Multiplicative, so the very
+# top hands stay ordered.
+THREE_SUITED_BONUS = 0.15  # percentile shrinks by this share when all three are one suit
+THREE_CONNECTED_BONUS = 0.10  # ... when the three ranks are distinct and within a 3-rank span (e.g. 9-T-J)
+
+
+def three_card_percentile(hole) -> float:
+    """Share of two-card hands at least as good as the best two of these three, less a bonus."""
+    best = min(chen_percentile(pair) for pair in combinations(hole, 2))
+    ranks = sorted({c >> 2 for c in hole})
+    bonus = 0.0
+    if len({c & 3 for c in hole}) == 1:
+        bonus += THREE_SUITED_BONUS
+    if len(ranks) == 3 and ranks[-1] - ranks[0] <= 2:
+        bonus += THREE_CONNECTED_BONUS
+    return best * (1 - bonus)
+
 
 def hand_class(hole) -> tuple[tuple[int, ...], ...]:
     """Suit-free class of a starting hand: its rank sets per suit, best first."""
@@ -68,6 +87,8 @@ class HandRanks:
             p = self.percentiles.get(hand_class(hole))
             if p is not None:
                 return p
+        if len(hole) == 3:
+            return three_card_percentile(hole)
         return chen_percentile(hole)
 
 

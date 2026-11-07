@@ -6,7 +6,7 @@ import pytest
 
 from bot.hands import MONSTER, NOTHING, TOP_PAIR, TWO_PAIR_PLUS, WEAK_PAIR, made_hand, strong_draw
 from bot.pushfold import PushFoldBot
-from bot.state import CALL, CHECK, FOLD, RAISE, Action, cards_from_str
+from bot.state import CALL, CHECK, FOLD, RAISE, Action, card_to_str, cards_from_str
 from engine import field
 from engine.field import CallingStation, ChenTAG, EquityCaller, Maniac, PushFold, RandomBot
 from engine.rules import NLHE, PLO, SHORT_DECK, TableConfig, game_rules
@@ -156,3 +156,45 @@ def test_strong_draws(hole, board, draw):
 ])
 def test_omaha_draws_use_exactly_two_hole_cards(hole, board, draw):
     assert strong_draw(cards_from_str(hole), cards_from_str(board), OMAHA) is draw
+
+
+# -- the three-card discard variant ---------------------------------------------------------
+
+def test_three_card_strength_is_the_best_two_plus_a_small_bonus():
+    from bot.baseline import preflop_percentile
+    from bot.preflop import CHEN, THREE_CONNECTED_BONUS, THREE_SUITED_BONUS
+
+    p = lambda s: CHEN.percentile(cards_from_str(s))  # noqa: E731
+    assert p("AsAd7c") == preflop_percentile(cards_from_str("AsAd"))  # no bonus: AA plus junk
+    assert p("AsAd7c") < p("KsKd7c") < p("9c5d2h")
+    suited = p("9h8h3h")
+    assert suited == pytest.approx(preflop_percentile(cards_from_str("9h8h")) * (1 - THREE_SUITED_BONUS))
+    connected = p("9c8dTh")
+    assert connected == pytest.approx(min(preflop_percentile(cards_from_str(x)) for x in ("9c8d", "9cTh", "8dTh"))
+                                      * (1 - THREE_CONNECTED_BONUS))
+
+
+def test_discard_rules_shrink_the_all_in_calling_range():
+    from dataclasses import replace
+
+    from bot.discard import default_rules
+    from bot.pushfold import DISCARD_CALL_SCALE
+
+    assert DISCARD_CALL_SCALE == 0.8
+    # The small blind shoves 15 BB into our big blind: a wide calling spot (~27% of hands).
+    # With discard rules (same state otherwise) some marginal calls must become folds, and
+    # no fold may become a call.
+    stacks = [300] * 8
+    calls = flipped = 0
+    bot = PushFoldBot()
+    rng = random.Random(9)
+    for _ in range(150):
+        hole = "".join(card_to_str(c) for c in rng.sample(range(52), 2))
+        state, plain = decisions(bot, 2, hole, "Kh7s2dJc4h", stacks=stacks,
+                                 others={1: Scripted(Action(RAISE, 300))})[0]
+        assert max(state.bets) == 300
+        discarding = bot.act(replace(state, rules=replace(default_rules(), seats=8)))
+        calls += plain.kind != FOLD
+        assert not (plain.kind == FOLD and discarding.kind != FOLD), hole
+        flipped += plain.kind != FOLD and discarding.kind == FOLD
+    assert calls > 20 and flipped > 0, (calls, flipped)

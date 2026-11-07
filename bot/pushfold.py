@@ -22,6 +22,9 @@ SHOVE_DEPTH_BB = 15  # first-in, shove or fold at or below this many big blinds
 OPEN_TO_BB = 2.5
 SHOVE_CALL_DEPTH_BB = 20  # facing a raise at or below this, it's all-in or fold
 PREMIUM = 0.025  # top share of hands that 3-bets when deep (QQ+, AK)
+# Discard variants: everyone keeps their best two of three, so a shover's range is stronger
+# than its two-card percentile says. Our all-in calling range shrinks by this factor.
+DISCARD_CALL_SCALE = 0.8
 DEEP_CALL = 0.08  # top share that flats a cheap raise when deep
 
 
@@ -87,7 +90,8 @@ class PushFoldBot:
             raiser = _last_raiser(state, 0)
             theirs = self._raiser_range(state, raiser, bb)
             waiting = self._still_to_act(state, seat, raiser)
-            if pct <= theirs * 0.7 / (1 + 0.5 * waiting) / self._call_tightness(state, raiser):
+            scale = DISCARD_CALL_SCALE if getattr(state.rules, "discards", 0) else 1.0
+            if pct <= theirs * 0.7 * scale / (1 + 0.5 * waiting) / self._call_tightness(state, raiser):
                 return commit(legal)
             return check_or(legal, call=False)
 
