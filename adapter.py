@@ -46,6 +46,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))  # bot/ sits next
 import poker_agent_sdk as sdk  # noqa: E402
 
 from bot.events import TableLog  # noqa: E402
+from bot.flags import flag  # noqa: E402
 from bot.handeval import warm as warm_evaluator  # noqa: E402
 from bot.policy import PolicyBot  # noqa: E402
 from bot.rules import VARIANTS, RulesError, blind_level, rules_from_config, rules_from_state  # noqa: E402
@@ -224,7 +225,10 @@ def to_kit_action(action: Action, state):
 
 
 def select_action(state):
-    """The Bay Area selection: our discard and reveal, or the kit's default (2, 0) on any error."""
+    """The Bay Area selection: our discard and reveal, or the kit's default (2, 0) on any error
+    (or when the build flag select=default asks for it, for A/B tests)."""
+    if flag("select", "smart") == "default":
+        return sdk.Action(SELECT_KIND, 0, DEFAULT_SELECT)
     try:
         try:
             rules, warnings = rules_from_state(state, aliases=VARIANT_ALIASES)

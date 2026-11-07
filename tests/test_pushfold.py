@@ -205,3 +205,26 @@ def test_discard_rules_shrink_the_all_in_calling_range():
         assert not (plain.kind == FOLD and discarding.kind != FOLD), hole
         flipped += plain.kind != FOLD and discarding.kind == FOLD
     assert calls > 20 and flipped > 0, (calls, flipped)
+
+
+def test_deep_in_the_discard_variant_only_the_very_top_stacks_off_preflop():
+    from dataclasses import replace
+
+    from bot.discard import default_rules
+    from bot.preflop import CHEN
+    from bot.pushfold import DEEP_SHOVE_TOP
+
+    discard_rules = replace(default_rules(), seats=8)
+    stacks = [3000] * 8  # 150 BB deep: a raise to 1300 is 43% of our stack, so it's all-in or fold
+    bot = PushFoldBot()
+    for hole, top in (("AsAdAh", True), ("AsAdKh", True), ("KsKd2c", False), ("AsKs7d", False)):
+        # The engine deals two-card hands here; swap in the three-card hand and the variant's rules.
+        state, _ = decisions(bot, 2, hole[:4], "Kh7s2dJc4h", stacks=stacks,
+                             others={1: Scripted(Action(RAISE, 1300))})[0]
+        deep = replace(state, rules=discard_rules, hole=cards_from_str(hole))
+        assert (CHEN.percentile(deep.hole) <= DEEP_SHOVE_TOP) is top, hole
+        if not top:
+            assert bot.act(deep).kind == FOLD, hole
+    # Two-card variants keep their old behaviour: kings still get it in there.
+    state, plain = decisions(bot, 2, "KsKd", "Kh7s2dJc4h", stacks=stacks, others={1: Scripted(Action(RAISE, 1300))})[0]
+    assert plain.kind == RAISE

@@ -25,6 +25,11 @@ PREMIUM = 0.025  # top share of hands that 3-bets when deep (QQ+, AK)
 # Discard variants: everyone keeps their best two of three, so a shover's range is stronger
 # than its two-card percentile says. Our all-in calling range shrinks by this factor.
 DISCARD_CALL_SCALE = 0.8
+# Discard variants, deep: risking the whole stack preflop with more than this many big blinds
+# effective only with the very top of the range. A quarter of our practice-round busts came
+# from 60+ BB stack-offs.
+DEEP_SHOVE_BB = 40
+DEEP_SHOVE_TOP = 0.015
 DEEP_CALL = 0.08  # top share that flats a cheap raise when deep
 
 
@@ -82,7 +87,8 @@ class PushFoldBot:
                 return raise_to(legal, OPEN_TO_BB * bb)
             return check_or(legal, call=False)
 
-        if pct <= self._resteal_range(state, depth):
+        too_deep = (getattr(state.rules, "discards", 0) and depth > DEEP_SHOVE_BB and pct > DEEP_SHOVE_TOP)
+        if pct <= self._resteal_range(state, depth) and not too_deep:
             return commit(legal)
 
         if legal.call_amount >= 0.4 * state.stacks[seat] or depth <= SHOVE_CALL_DEPTH_BB:
@@ -92,7 +98,8 @@ class PushFoldBot:
             waiting = self._still_to_act(state, seat, raiser)
             scale = DISCARD_CALL_SCALE if getattr(state.rules, "discards", 0) else 1.0
             if pct <= theirs * 0.7 * scale / (1 + 0.5 * waiting) / self._call_tightness(state, raiser):
-                return commit(legal)
+                if not too_deep:
+                    return commit(legal)
             return check_or(legal, call=False)
 
         if pct <= PREMIUM:

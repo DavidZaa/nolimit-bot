@@ -87,6 +87,9 @@ def build(out: Path, replace: bool) -> None:
         if not (out / MARKER).exists():
             raise ReleaseError(f"{out} wasn't built by this script (no {MARKER} marker); not deleting it")
         shutil.rmtree(out)
+        zipped = out.parent / f"{out.name}.zip"
+        if zipped.exists():  # poker-agent pack won't overwrite it; it's the old build's upload
+            zipped.unlink()
     out.mkdir(parents=True, exist_ok=True)
     shutil.copy2(ROOT / "adapter.py", out / "agent.py")
     shutil.copytree(ROOT / "bot", out / "bot", ignore=lambda d, names: [
