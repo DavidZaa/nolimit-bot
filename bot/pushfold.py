@@ -17,7 +17,7 @@ from bot.actions import check_or, commit, raise_to
 from bot.flags import flag
 from bot.preflop import CHEN, three_card_score
 from bot.hands import TOP_PAIR, TWO_PAIR_PLUS, made_hand
-from bot.state import CHECK, RAISE, Action
+from bot.state import CALL, CHECK, RAISE, Action
 
 SHOVE_DEPTH_BB = 15  # first-in, shove or fold at or below this many big blinds
 OPEN_TO_BB = 2.5
@@ -41,6 +41,13 @@ SURVIVE_SHOVE, SURVIVE_CALL = 0.03, 0.04
 # button opens or shoves the top HU_OPEN and the big blind calls a shove with the top
 # HU_CALL. Three or more left: the normal ranges (measured: wider ranges there cost cashes).
 SHORT_HANDED_PLAYERS = 2
+# late_position (build flag): in discard variants with 5+ left, first-in opens widen on the
+# button and small blind; facing one raise from the cutoff, button or small blind, the top
+# LATE_3BET re-raises (a shove at or under LATE_SHOVE_BB) and the top LATE_CALL calls when
+# the call is at most LATE_CALL_STACK of our stack.
+LATE_FULL_PLAYERS = 5
+LATE_BUTTON_WIDEN, LATE_SB_WIDEN = 1.5, 1.3
+LATE_3BET, LATE_CALL, LATE_CALL_STACK, LATE_SHOVE_BB = 0.08, 0.15, 0.10, 25
 HU_DEPTH_BB = 20
 HU_OPEN, HU_CALL = 0.70, 0.40
 DEEP_CALL = 0.08  # top share that flats a cheap raise when deep
@@ -93,6 +100,8 @@ class PushFoldBot:
         if short:
             pct = three_card_score(state.hole)  # the wider scale
         heads_up = short and state.players_left == 2 and depth <= HU_DEPTH_BB
+        late = (getattr(state.rules, "discards", 0) and flag("late_position", "off") == "on"
+                and state.players_left >= LATE_FULL_PLAYERS)
 
         if highest <= bb:
             if heads_up and seat == state.sb_seat:
@@ -101,6 +110,10 @@ class PushFoldBot:
                 return check_or(legal, call=False)
             behind = self._behind(state, seat)
             widen = self._steal_widening(state, behind)
+            if late and seat == state.button:
+                widen *= LATE_BUTTON_WIDEN
+            elif late and seat == state.sb_seat:
+                widen *= LATE_SB_WIDEN
             if depth <= SHOVE_DEPTH_BB:
                 if pct <= shove_range(depth, len(behind)) * widen / self._shove_tightness(state, behind):
                     return commit(legal)
@@ -117,6 +130,12 @@ class PushFoldBot:
             too_deep = True  # no re-shove either
         if pct <= self._resteal_range(state, depth) and not too_deep:
             return commit(legal)
+
+        if late and self._single_late_raise(state):
+            if pct <= LATE_3BET:
+                return commit(legal) if depth <= LATE_SHOVE_BB else raise_to(legal, 3 * highest)
+            if pct <= LATE_CALL and legal.call_amount <= LATE_CALL_STACK * (state.stacks[seat] + state.bets[seat]):
+                return Action(CALL) if legal.can_call else check_or(legal, call=False)
 
         if legal.call_amount >= 0.4 * state.stacks[seat] or depth <= SHOVE_CALL_DEPTH_BB:
             if heads_up and seat == state.bb_seat:
@@ -189,6 +208,15 @@ class PushFoldBot:
     def _resteal_range(self, state, depth_bb: float) -> float:
         """Share of hands to re-shove over a raise as a resteal, on top of the usual ranges."""
         return 0.0
+
+    def _single_late_raise(self, state) -> bool:
+        """Exactly one preflop raise so far, nobody in with it, from the cutoff, button or small blind."""
+        raises = [r for r in state.actions if r.street == 0 and r.kind == RAISE]
+        calls = [r for r in state.actions if r.street == 0 and r.kind == CALL]
+        if len(raises) != 1 or calls:
+            return False
+        n = len(state.stacks)
+        return raises[0].seat in (state.button, state.sb_seat, (state.button - 1) % n)
 
     def _fold_marginal(self, state) -> bool:
         """Facing a bet with less than two pair: give it up (an opponent's visible hand is strong)."""

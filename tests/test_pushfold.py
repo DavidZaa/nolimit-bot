@@ -252,3 +252,28 @@ def test_short_handed_heads_up_ranges_in_the_discard_variant(monkeypatch):
     assert bot.act(replace(hu, players_left=3)).kind == FOLD
     monkeypatch.setenv("NLB_SHORT_HANDED", "off")
     assert bot.act(hu).kind == FOLD
+
+
+def test_late_position_widens_the_button_and_plays_back_at_late_raises(monkeypatch):
+    from dataclasses import replace
+
+    from bot.discard import default_rules
+    from bot.pushfold import LATE_3BET, LATE_CALL
+
+    rules = replace(default_rules(), seats=8)
+    monkeypatch.setenv("NLB_LATE_POSITION", "on")
+    bot = PushFoldBot()
+    # Button first in, 100 BB: a hand just outside the normal button range opens with the flag.
+    state, plain = decisions(bot, 0, "Jc8d", "Kh7s2dJc4h")[0]
+    late = replace(state, rules=rules, hole=cards_from_str("KcJd4s"))
+    pct = bot.ranks.percentile(late.hole)
+    assert 0.45 / 2 ** 0.8 < pct <= 0.45 / 2 ** 0.8 * 1.5  # (two behind: SB and BB)
+    assert bot.act(late).kind == RAISE and bot.act(replace(late, players_left=4)).kind == FOLD
+    # Facing a cutoff open in the big blind at 20 BB: top 8% shoves, top 15% calls cheap, else folds.
+    stacks = [400] * 8
+    state, _ = decisions(bot, 2, "AsKd", "Kh7s2dJc4h", stacks=stacks, others={7: Scripted(Action(RAISE, 50))})[0]
+    for hole, want in (("AsAd7c", RAISE), ("AsQd7c", CALL), ("9c4d2h", FOLD)):
+        deep = replace(state, rules=rules, hole=cards_from_str(hole))
+        p = bot.ranks.percentile(deep.hole)
+        assert (p <= LATE_3BET, p <= LATE_CALL) == {RAISE: (True, True), CALL: (False, True), FOLD: (False, False)}[want], hole
+        assert bot.act(deep).kind == want, hole

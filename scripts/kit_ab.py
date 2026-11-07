@@ -58,20 +58,33 @@ def table_points(history: Path, styles: dict | None = None) -> list[dict]:
                 continue
             for hand in rec["hands"]:
                 preflop, vpip, shoves = True, set(), set()
+                raised, first_in, faced, folded_to = False, set(), set(), set()
                 for ev in hand["events"]:
                     kind, seat = ev.get("kind"), ev.get("seat")
                     if kind == "board":
                         preflop = False
                     elif preflop and kind in ("call", "raise") and seat is not None:
                         vpip.add(seat)
+                        if kind == "raise":
+                            if not raised and seat not in vpip - {seat}:
+                                first_in.add(seat)
+                            raised = True
+                    elif preflop and kind == "fold" and seat is not None and raised:
+                        faced.add(seat)
+                        folded_to.add(seat)
                     elif kind == "prize_the_shover" and seat is not None:
                         shoves.add(seat)
+                    if preflop and raised and kind in ("call", "raise") and seat is not None:
+                        faced.add(seat)
                 for i, label in enumerate(seats):
                     if hand["stacks_before"][i] > 0:
-                        st = styles.setdefault(label.split("#")[0], [0, 0, 0, [0, 0, 0, 0, 0]])
+                        st = styles.setdefault(label.split("#")[0], [0, 0, 0, [0, 0, 0, 0, 0], 0, 0, 0])
                         st[0] += 1
                         st[1] += i in vpip
                         st[2] += i in shoves
+                        st[4] += i in first_in
+                        st[5] += i in faced
+                        st[6] += i in folded_to
             # Places: survivors by final chips, busted seats by how long they lasted.
             hands = rec["hands"]
             bust_hand = {}
@@ -84,7 +97,7 @@ def table_points(history: Path, styles: dict | None = None) -> list[dict]:
                                                              bust_hand.get(i, (10**9, 0))), reverse=True)
             paid = sum(1 for x in rec.get("payouts", (1, 1, 1)) if x)
             for place, i in enumerate(order, 1):
-                st = styles.setdefault(seats[i].split("#")[0], [0, 0, 0, [0, 0, 0, 0, 0]])
+                st = styles.setdefault(seats[i].split("#")[0], [0, 0, 0, [0, 0, 0, 0, 0], 0, 0, 0])
                 st[3][4] += 1
                 if place <= 3:
                     st[3][place - 1] += 1
@@ -122,10 +135,16 @@ def main(argv=None) -> int:
     p.add_argument("--seeds", default="1,2")
     p.add_argument("--kit", type=Path, default=ROOT.parent / "starter-kit")
     p.add_argument("--extra", default="", help="other bot folders to seat too, comma-separated")
+    p.add_argument("--realistic", action="store_true",
+                   help="2 + 2 of ours plus smart_tag, reader, default_tag, pushfold from ~/Desktop/2026/opponents")
     args = p.parse_args(argv)
     work = Path(tempfile.mkdtemp(prefix="kit-ab-"))
     (a, a_dir), (b, b_dir) = build(args.a, args.base, work), build(args.b, args.base, work)
-    dirs = [a_dir] * args.seats + [b_dir] * args.seats + [Path(d).resolve() for d in args.extra.split(",") if d]
+    extra = [Path(d).resolve() for d in args.extra.split(",") if d]
+    if args.realistic:
+        args.seats = 2
+        extra += [Path.home() / "Desktop" / "2026" / "opponents" / n for n in ("smart_tag", "reader", "default_tag", "pushfold")]
+    dirs = [a_dir] * args.seats + [b_dir] * args.seats + extra  # play reseats every table
     pooled = []
     for seed in args.seeds.split(","):
         styles: dict = {}
@@ -143,8 +162,9 @@ def main(argv=None) -> int:
         print(f"seed {seed}: {len(tables)} tables | {a} {sum(a_pts) / len(a_pts):6.2f}  {b} "
               f"{sum(b_pts) / len(b_pts):6.2f} | {a} - {b} = {m:+.2f} ± {ci:.2f} (95%) | "
               f"failed decisions: {failed or 0}")
-        for name, (hands, vpip, shoves, (p1, p2, p3, cash, n)) in sorted(styles.items()):
+        for name, (hands, vpip, shoves, (p1, p2, p3, cash, n), opens, faced, folds) in sorted(styles.items()):
             print(f"    {name:14} VPIP {100 * vpip / hands:5.1f}%  shove {100 * shoves / hands:4.1f}%  "
+                  f"first-in raise {100 * opens / hands:4.1f}%  fold-to-raise {100 * folds / max(1, faced):4.1f}%  "
                   f"1st {100 * p1 / n:4.1f}%  2nd {100 * p2 / n:4.1f}%  3rd {100 * p3 / n:4.1f}%  "
                   f"cash {100 * cash / n:4.1f}%  HU win {100 * p1 / max(1, p1 + p2):4.1f}%  ({n} seat-tables)")
     m, ci = mean_ci(pooled)
