@@ -65,7 +65,14 @@ TUNED_CALL_STACK, TUNED_CALL_BB, TUNED_SB_STEAL_BB = 0.15, 4, 40  # no any-two S
 # 15-25 BB; only the top RESTEAL_STICKY vs a seat folding under 55% to re-raises (5+ seen);
 # continue against a 4-bet only with the top RESTEAL_4BET.
 RESTEAL_TOP, RESTEAL_STICKY, RESTEAL_4BET = 0.25, 0.10, 0.05
-FIGHT_BB, FIGHT_SHARE = 30, 0.40  # re-raised after our open at <= 30 BB: shove the top 40% of the open range
+FIGHT_BB, FIGHT_SHARE = 30, 0.40
+# deep (build flag): 40+ BB effective, see more flops: wider middle/late opens, and calls of
+# small opens in position and from the big blind. closer (build flag): 3-5 left as the chip
+# leader: open the top 70% (any two button/small blind), re-shove over shorter stacks' opens
+# with the top 35%, call their all-ins with the top 30%.
+DEEP_BB, DEEP_WIDEN, DEEP_OPEN_BB = 40, 1.5, 3
+DEEP_CALL_IP, DEEP_CALL_BB = 0.30, 0.40
+CLOSER_PLAYERS, CLOSER_OPEN, CLOSER_RESHOVE, CLOSER_CALL = (3, 4, 5), 0.70, 0.35, 0.30  # re-raised after our open at <= 30 BB: shove the top 40% of the open range
 # bubble (build flag): with 4-5 left and our stack covering everyone still to act, pressure.
 BUBBLE_PLAYERS = (4, 5)
 BUBBLE_EARLY_OPEN, BUBBLE_SHOVE = 0.50, 0.50
@@ -132,6 +139,11 @@ class PushFoldBot:
         open_shares = TUNED_OPEN if tuned else CAL_OPEN
         bubble = (getattr(state.rules, "discards", 0) and flag("bubble", "off") == "on"
                   and state.players_left in BUBBLE_PLAYERS)
+        deep_flag = getattr(state.rules, "discards", 0) and flag("deep", "off") == "on" and depth >= DEEP_BB
+        mine_total = state.stacks[seat] + state.bets[seat]
+        closer = (getattr(state.rules, "discards", 0) and flag("closer", "off") == "on"
+                  and state.players_left in CLOSER_PLAYERS
+                  and all(state.stacks[s] + state.bets[s] < mine_total for s in range(n) if s != seat and state.in_hand[s]))
         if bubble:
             behind_all = seats_behind(state, seat)
             mine = state.stacks[seat] + state.bets[seat]
@@ -154,6 +166,12 @@ class PushFoldBot:
                     return commit(legal)
                 if pct <= shove_range(depth, len(behind)) * widen / self._shove_tightness(state, behind):
                     return commit(legal)
+                return check_or(legal, call=False)
+            if deep_flag and len(behind) <= 4:
+                widen *= DEEP_WIDEN
+            if closer and depth > SHOVE_DEPTH_BB:
+                if seat in (state.button, state.sb_seat) or pct <= CLOSER_OPEN:
+                    return raise_to(legal, OPEN_TO_BB * bb)
                 return check_or(legal, call=False)
             if bubble and depth > SHOVE_DEPTH_BB:
                 late_seat = seat in (state.button, state.sb_seat, cutoff)
@@ -182,6 +200,18 @@ class PushFoldBot:
             return commit(legal)
 
         pre_raises = [r.seat for r in state.actions if r.street == 0 and r.kind == RAISE]
+        if closer and len(pre_raises) == 1 and seat not in pre_raises:
+            raiser = pre_raises[0]
+            their_all_in = highest >= state.stacks[raiser] + state.bets[raiser]
+            if pct <= (CLOSER_CALL if their_all_in else CLOSER_RESHOVE):
+                return commit(legal)  # they can't bust us
+            return check_or(legal, call=False)
+        if (deep_flag and len(pre_raises) == 1 and seat not in pre_raises and highest <= DEEP_OPEN_BB * bb
+                and highest < state.stacks[pre_raises[0]] + state.bets[pre_raises[0]] and legal.can_call
+                and not any(r.kind == CALL and r.street == 0 for r in state.actions)):
+            in_position = seat in (state.button, cutoff)
+            if (in_position and pct <= DEEP_CALL_IP) or (seat == state.bb_seat and pct <= DEEP_CALL_BB):
+                return Action(CALL)
         if calibrated and flag("resteal", "off") == "on" and seat in pre_raises and depth >= 15:
             if len(pre_raises) == 2 and pre_raises[0] == seat and depth <= FIGHT_BB:  # our open got re-raised
                 position = "button" if seat == state.button else "sb" if seat == state.sb_seat else (

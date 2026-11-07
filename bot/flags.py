@@ -17,7 +17,7 @@ from __future__ import annotations
 import os
 
 FLAGS: dict = {"short_handed": "on", "late_position": "on", "calibrated": "on", "exposed_reads": "on",
-               "cal_tuned": "on", "resteal": "on", "bubble": "on"}  # round 5: fight + bubble
+               "cal_tuned": "on", "resteal": "on", "deep": "on", "closer": "on"}  # deep_closer build
 
 
 def flag(name: str, default: str) -> str:

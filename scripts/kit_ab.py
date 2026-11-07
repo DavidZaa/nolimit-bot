@@ -44,6 +44,7 @@ def build(spec: str, base: Path, work: Path) -> tuple[str, Path]:
 
 
 opens: dict = {}  # label -> non-all-in first-in open sizes in big blinds
+flops: dict = {}  # label -> hands in which the seat saw the flop
 positions: dict = {}  # label -> position -> [hands there, first-in raises there]
 
 
@@ -72,10 +73,19 @@ def table_points(history: Path, styles: dict | None = None) -> list[dict]:
                     pos[button] = "button"
                     pos[after[0]] = "sb"
                 bb_size = hand["blinds"][1] or 1
+                folded_pre = set()
+                saw_flop = set()
                 for ev in hand["events"]:
                     kind, seat = ev.get("kind"), ev.get("seat")
                     if kind == "board":
+                        if preflop:
+                            saw_flop = {i for i in alive if i not in folded_pre}
                         preflop = False
+                    elif preflop and kind == "fold" and seat is not None:
+                        folded_pre.add(seat)
+                        if raised:
+                            faced.add(seat)
+                            folded_to.add(seat)
                     elif preflop and kind in ("call", "raise") and seat is not None:
                         vpip.add(seat)
                         if kind == "raise":
@@ -98,6 +108,7 @@ def table_points(history: Path, styles: dict | None = None) -> list[dict]:
                         st[1] += i in vpip
                         st[2] += i in shoves
                         st[4] += i in first_in
+                        flops[label.split("#")[0]] = flops.get(label.split("#")[0], 0) + (i in saw_flop)
                         st[5] += i in faced
                         st[6] += i in folded_to
                         if i in pos:
@@ -187,6 +198,7 @@ def main(argv=None) -> int:
             where = "  ".join(f"{k} open {100 * v[1] / max(1, v[0]):4.1f}%" for k, v in sorted(by.items()))
             sizes = opens.get(name, [])
             size = f"open size {sum(sizes) / len(sizes):.1f} BB" if sizes else ""
+            size += f"  flops/table {flops.get(name, 0) / max(1, n):.1f}"
             print(f"    {name:14} VPIP {100 * vpip / hands:5.1f}%  shove {100 * shoves / hands:4.1f}%  "
                   f"first-in raise {100 * opens_ / hands:4.1f}%  fold-to-raise {100 * folds / max(1, faced):4.1f}%  "
                   f"{where}  {size}\n{' ' * 19}"
