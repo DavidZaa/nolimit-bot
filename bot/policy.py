@@ -176,14 +176,14 @@ class PolicyBot(PushFoldBot):
             return super()._bet_when_checked_to(state, strength)
         others = [s for s in range(len(state.stacks)) if s != state.seat and state.in_hand[s]]
         folds = min((self.tracker.fold_to_bet(s) for s in others), default=PRIORS["fold_to_bet"])
+        if (flag("late_streets", "off") == "on" and state.street >= 3 and strength >= TWO_PAIR_PLUS
+                and self._two_pair_with_hole(state)):
+            return state.pot * 3 // 4  # river value bet
         if strength >= TOP_PAIR:
             return state.pot * 3 // 4 if folds < STICKY else state.pot // 2
         if strength == WEAK_PAIR and folds < STICKY:
             return state.pot // 2
         heads_up = len(others) == 1
-        if (flag("late_streets", "off") == "on" and state.street >= 3 and strength >= TWO_PAIR_PLUS
-                and self._two_pair_with_hole(state)):
-            return state.pot * 3 // 4  # river value bet
         if (flag("expose_play", "off") == "on" and state.street == 1 and len(others) <= 2
                 and self._my_exposed_pairs_board(state) and (strength >= WEAK_PAIR
                                                              or strong_draw(state.hole, state.board, state.rules))):
